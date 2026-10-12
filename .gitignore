@@ -1,0 +1,11 @@
+bin/
+build/
+obj/
+artifacts/
+.vs/
+.idea/
+*.user
+*.suo
+*.dll
+*.pdb
+*.zip

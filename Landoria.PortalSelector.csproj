@@ -1,0 +1,85 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>Landoria.PortalSelector</RootNamespace>
+    <AssemblyName>Landoria.PortalSelector</AssemblyName>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <Deterministic>false</Deterministic>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <ValheimGamePath Condition="'$(ValheimGamePath)' == ''">$(VALHEIM_PATH)</ValheimGamePath>
+    <BepInExPath Condition="'$(OS)' == 'Windows_NT'">$(APPDATA)/r2modmanPlus-local/Valheim/profiles/Default/BepInEx</BepInExPath>
+    <BepInExPath Condition="'$(BepInExPath)' == ''">$(BEPINEX_PATH)</BepInExPath>
+    <ValheimManagedPath Condition="'$(ValheimManagedPath)' == ''">$(ValheimGamePath)/valheim_Data/Managed</ValheimManagedPath>
+    <ModDeployPath Condition="'$(ModDeployPath)' == ''">$(BepInExPath)/plugins/Landoria.PortalSelector</ModDeployPath>
+    <DeployOnBuild Condition="'$(DeployOnBuild)' == ''">true</DeployOnBuild>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="HarmonyValidator" Version="1.0.0" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="BepInEx">
+      <HintPath>$(BepInExPath)/core/BepInEx.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="0Harmony">
+      <HintPath>$(BepInExPath)/core/0Harmony.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="assembly_valheim">
+      <HintPath>$(ValheimManagedPath)/assembly_valheim.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="assembly_utils">
+      <HintPath>$(ValheimManagedPath)/assembly_utils.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine">
+      <HintPath>$(ValheimManagedPath)/UnityEngine.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>$(ValheimManagedPath)/UnityEngine.CoreModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.UI">
+      <HintPath>$(ValheimManagedPath)/UnityEngine.UI.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.UIModule">
+      <HintPath>$(ValheimManagedPath)/UnityEngine.UIModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Unity.TextMeshPro">
+      <HintPath>$(ValheimManagedPath)/Unity.TextMeshPro.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="assembly_guiutils">
+      <HintPath>$(ValheimManagedPath)/assembly_guiutils.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="gui_framework">
+      <HintPath>$(ValheimManagedPath)/gui_framework.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <Target Name="ValidateModPaths" BeforeTargets="ResolveReferences">
+    <Error Condition="!Exists('$(ValheimManagedPath)/assembly_valheim.dll')"
+           Text="Set VALHEIM_PATH to the game root, or override ValheimManagedPath to its Managed directory." />
+    <Error Condition="!Exists('$(BepInExPath)/core/BepInEx.dll')"
+           Text="Set BEPINEX_PATH to your development profile's BepInEx directory." />
+  </Target>
+
+  <Target Name="DeployMod" AfterTargets="Build"
+          Condition="'$(Configuration)' == 'Release' and '$(DeployOnBuild)' == 'true'">
+    <MakeDir Directories="$(ModDeployPath)" />
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(ModDeployPath)" SkipUnchangedFiles="true" />
+    <Message Importance="high" Text="Deployed $(TargetFileName) to $(ModDeployPath). Restart Valheim before testing." />
+  </Target>
+
+</Project>
