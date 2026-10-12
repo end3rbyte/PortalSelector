@@ -81,6 +81,16 @@ namespace Landoria.PortalSelector
                 PlayerDestinations.InitializeFromShared(portal);
                 InitializeName(portal);
             }
+            foreach (PortalRecord record in Records.Values)
+            {
+                Heightmap.Biome biome = ResolveBiome(record.Position);
+                if (record.Biome == biome) { continue; }
+                PortalLog.Detail("biome", "Corrected " +
+                    PortalLog.Describe(record) + " from " + record.Biome +
+                    " to " + biome + ".");
+                record.Biome = biome;
+                changed = true;
+            }
             PlayerPortalNames.EnsureUniqueNames(Records.Values);
             if (changed) { PlayerPortalCatalog.Save(_player, _catalogKey, Records); }
         }
@@ -355,7 +365,7 @@ namespace Landoria.PortalSelector
             {
                 Id = portal.m_uid, Tag = portal.GetString(ZDOVars.s_tag),
                 Position = portal.GetPosition(), Rotation = portal.GetRotation(),
-                Biome = WorldGenerator.instance.GetBiome(portal.GetPosition()),
+                Biome = ResolveBiome(portal.GetPosition()),
                 AllowAllItems = component.m_allowAllItems,
                 ExitDistance = component.m_exitDistance
             };
@@ -364,7 +374,8 @@ namespace Landoria.PortalSelector
             bool existed = Records.TryGetValue(identity, out PortalRecord old);
             bool changed = collided || !existed ||
                 old.Id != record.Id || old.Tag != record.Tag ||
-                old.Position != record.Position || old.Rotation != record.Rotation;
+                old.Position != record.Position || old.Rotation != record.Rotation ||
+                old.Biome != record.Biome;
             Records[identity] = record;
             Confirmed.Add(record.Id);
             if (changed)
@@ -373,6 +384,14 @@ namespace Landoria.PortalSelector
                     "Updated ") + PortalLog.Describe(record));
             }
             return changed;
+        }
+
+        // Uses the loaded terrain when possible and the world's biome map elsewhere.
+        private static Heightmap.Biome ResolveBiome(Vector3 position)
+        {
+            Heightmap.Biome loaded = Heightmap.FindBiome(position);
+            if (loaded != Heightmap.Biome.None) { return loaded; }
+            return WorldGenerator.instance.GetBiomeSector(position).Biome;
         }
 
         // Drops a stale position if its old network ID now belongs elsewhere.
