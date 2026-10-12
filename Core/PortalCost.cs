@@ -3,10 +3,11 @@ using UnityEngine;
 
 namespace Landoria.PortalSelector
 {
-    // Applies the configured material cost to the classic portal prefab.
+    // Applies a fixed material cost to the classic portal prefab.
     [HarmonyPatch(typeof(ZNetScene), "Awake")]
     internal static class PortalCost
     {
+        internal const int CostMultiplier = 2;
         // Updates the prefab when the game registers its pieces.
         [HarmonyPostfix]
         private static void OnSceneReady()
@@ -15,12 +16,12 @@ namespace Landoria.PortalSelector
             Apply();
         }
 
-        // Updates the material amounts after startup or a config reload.
+        // Updates the material amounts after startup.
         internal static void Apply()
         {
             GameObject prefab = ZNetScene.instance?.GetPrefab("portal_wood");
             Piece piece = prefab?.GetComponent<Piece>();
-            if (piece == null || Plugin.CostMultiplier == null)
+            if (piece == null)
             {
                 return;
             }
@@ -31,9 +32,9 @@ namespace Landoria.PortalSelector
                     name == "GreydwarfEye" ? 10 : name == "SurtlingCore" ? 2 : 0;
                 if (amount > 0)
                 {
-                    resource.m_amount = Mathf.RoundToInt(amount * Plugin.CostMultiplier.Value);
+                    resource.m_amount = amount * CostMultiplier;
                     PortalLog.Detail("cost", name + " = " + resource.m_amount +
-                        " (multiplier " + Plugin.CostMultiplier.Value + ").");
+                        " (multiplier " + CostMultiplier + ").");
                 }
             }
         }

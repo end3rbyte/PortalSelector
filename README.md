@@ -23,13 +23,11 @@ When a portal has no personal name, the mod copies its shared tag and adds `_1` 
 
 ## Construction cost
 
-`Construction.PortalCostMultiplier` accepts `1`, `1.5`, or `2`; the default is `1.5`. It changes the classic wooden portal recipe on this client and reloads when the configuration file changes.
+The classic wooden portal recipe uses a fixed cost multiplier of `2` on this client.
 
-| Multiplier | Fine wood | Greydwarf eyes | Surtling cores |
-| --- | ---: | ---: | ---: |
-| 1 | 20 | 10 | 2 |
-| 1.5 | 30 | 15 | 3 |
-| 2 | 40 | 20 | 4 |
+| Fine wood | Greydwarf eyes | Surtling cores |
+| ---: | ---: | ---: |
+| 40 | 20 | 4 |
 
 The mod asks Valheim for the chosen portal's current object data. It shows **Connected** and enables the local portal effect only after that data arrives. It teleports to the confirmed current location without changing either portal's shared tag or connection. The mod keeps Valheim's portal restrictions for world rules, bosses, and blocked items.
 
