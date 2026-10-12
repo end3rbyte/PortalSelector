@@ -33,8 +33,6 @@ namespace Landoria.PortalSelector
                 if (amount > 0)
                 {
                     resource.m_amount = amount * CostMultiplier;
-                    PortalLog.Detail("cost", name + " = " + resource.m_amount +
-                        " (multiplier " + CostMultiplier + ").");
                 }
             }
         }

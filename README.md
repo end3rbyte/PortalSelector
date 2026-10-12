@@ -3,9 +3,9 @@
 PortalSelector lets each player give portals personal names and choose personal destinations. Shared portal tags and links remain untouched.
 Install it on the client; the server and other players do not need the mod.
 
-Plugin setup, configuration, cost, and logging files are at the project root.
-The remaining source files are grouped under `Portals` (portal records and
-character data) and `UI` (interaction and dialogs).
+Plugin setup is at the project root. Other source files are grouped under
+`Portals` (portal records, character data, and cost) and `UI` (interaction and
+dialogs).
 
 ## Controls
 

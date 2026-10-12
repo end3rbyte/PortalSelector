@@ -41,18 +41,8 @@ namespace Landoria.PortalSelector
                 .ThenBy(r => r.Biome.ToString()).ToList();
             _committed = PlayerDestinations.Get(origin);
             _selected = _committed;
-            PortalLog.Detail("dialog", "Opening from " +
-                PortalLog.Describe(PortalDirectory.Find(origin)) +
-                "; choices=" + _options.Count + "; saved ZDO=" + _committed);
-            foreach (PortalRecord option in _options)
-            {
-                PortalLog.Detail("dialog", "Choice " +
-                    PortalLog.Describe(option) + "; personal=\"" +
-                    PortalLog.Clean(PlayerPortalNames.Get(option.Id)) + "\"");
-            }
             if (_options.Count == 0)
             {
-                PortalLog.Detail("dialog", "No confirmed destinations to display.");
                 Player.m_localPlayer?.Message(MessageHud.MessageType.Center,
                     "No known destinations yet.");
                 return;
@@ -71,14 +61,8 @@ namespace Landoria.PortalSelector
                 PlayerDestinations.Set(_origin, _selected);
                 _committed = _selected;
                 PortalConnection.Request(_selected);
-                PortalLog.Detail("dialog", "Confirmed destination " + _origin +
-                    " -> " + _selected + ".");
                 Player.m_localPlayer?.Message(MessageHud.MessageType.TopLeft,
                     "Portal destination selected. Connecting...");
-            }
-            else
-            {
-                PortalLog.Detail("dialog", "Confirmation ignored; invalid or empty choice.");
             }
         }
 
@@ -113,8 +97,6 @@ namespace Landoria.PortalSelector
                 return;
             }
             _lastState = state;
-            PortalLog.Detail("dialog", "Selected destination " + _committed +
-                " changed state to " + state + ".");
             RefreshChoice();
             if (_menu != null && _menu.activeSelf)
             {

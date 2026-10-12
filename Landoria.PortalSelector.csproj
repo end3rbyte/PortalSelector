@@ -9,10 +9,11 @@
     <ImplicitUsings>disable</ImplicitUsings>
     <Nullable>disable</Nullable>
     <ValheimGamePath Condition="'$(ValheimGamePath)' == ''">$(VALHEIM_PATH)</ValheimGamePath>
-    <BepInExPath Condition="'$(OS)' == 'Windows_NT'">$(APPDATA)/r2modmanPlus-local/Valheim/profiles/Default/BepInEx</BepInExPath>
+    <BepInExPath Condition="'$(OS)' == 'Windows_NT' and '$(GITHUB_ACTIONS)' != 'true'">$(APPDATA)/r2modmanPlus-local/Valheim/profiles/Default/BepInEx</BepInExPath>
     <BepInExPath Condition="'$(BepInExPath)' == ''">$(BEPINEX_PATH)</BepInExPath>
     <ValheimManagedPath Condition="'$(ValheimManagedPath)' == ''">$(ValheimGamePath)/valheim_Data/Managed</ValheimManagedPath>
     <ModDeployPath Condition="'$(ModDeployPath)' == ''">$(BepInExPath)/plugins/Landoria.PortalSelector</ModDeployPath>
+    <DeployOnBuild Condition="'$(DeployOnBuild)' == '' and '$(GITHUB_ACTIONS)' == 'true'">false</DeployOnBuild>
     <DeployOnBuild Condition="'$(DeployOnBuild)' == ''">true</DeployOnBuild>
   </PropertyGroup>
 

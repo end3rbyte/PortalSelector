@@ -13,9 +13,15 @@ namespace Landoria.PortalSelector
         private static void HoverText(TeleportWorld __instance, ref string __result)
         {
             ZDO zdo = __instance.GetComponent<ZNetView>()?.GetZDO();
-            if (zdo == null) { return; }
+            if (zdo == null)
+            {
+                return;
+            }
             string personal = PlayerPortalNames.Get(zdo.m_uid).RemoveRichTextTags();
-            if (string.IsNullOrWhiteSpace(personal)) { personal = "Portail"; }
+            if (string.IsNullOrWhiteSpace(personal))
+            {
+                personal = "Portail";
+            }
             string shared = PortalDisplay.SharedTag(
                 zdo.GetString(ZDOVars.s_tag));
             ZDOID selected = Selected(__instance);
@@ -79,14 +85,10 @@ namespace Landoria.PortalSelector
             {
                 if (ShiftHeld())
                 {
-                    PortalLog.Detail("interaction", "Shift+E at " +
-                        PortalLog.Describe(PortalDirectory.Find(zdo.m_uid)));
                     PortalDirectory.Request(zdo.m_uid);
                 }
                 else
                 {
-                    PortalLog.Detail("interaction", "E opens personal rename at " +
-                        PortalLog.Describe(PortalDirectory.Find(zdo.m_uid)));
                     string shared = PortalDisplay.SharedTag(
                         zdo.GetString(ZDOVars.s_tag));
                     TextInput.instance.RequestText(new PortalNameReceiver(zdo.m_uid),
@@ -107,14 +109,8 @@ namespace Landoria.PortalSelector
                 return true;
             }
             ZDOID selected = Selected(__instance);
-            ZDOID source = __instance.GetComponent<ZNetView>()?.GetZDO()?.m_uid ??
-                ZDOID.None;
-            PortalLog.Throttled("travel:" + source + ":" + selected,
-                "travel", "Attempt " + source + " -> " + selected + ".");
             if (selected == ZDOID.None)
             {
-                PortalLog.Throttled("travel:none:" + source, "travel",
-                    "Blocked: no personal destination for " + source + ".");
                 player.Message(MessageHud.MessageType.Center,
                     "Choose a personal destination with Shift+E.");
                 return false;
@@ -123,8 +119,6 @@ namespace Landoria.PortalSelector
             PortalRecord details = PortalDirectory.Find(selected);
             if (target == null || details == null)
             {
-                PortalLog.Throttled("travel:missing:" + selected, "travel",
-                    "Waiting for target ZDO " + selected + ".");
                 PortalConnection.Request(selected);
                 player.Message(MessageHud.MessageType.Center,
                     "Selected portal is not connected yet.");
@@ -134,21 +128,21 @@ namespace Landoria.PortalSelector
             {
                 return false;
             }
+            Travel(player, target, details);
+            return false;
+        }
+
+        // Sends the player to the confirmed destination portal.
+        private static void Travel(Player player, ZDO target,
+            PortalRecord details)
+        {
             Quaternion rotation = target.GetRotation();
             Vector3 exit = target.GetPosition() + rotation * Vector3.forward *
                 details.ExitDistance + Vector3.up;
             if (player.TeleportTo(exit, rotation, true))
             {
-                PortalLog.Info("travel", "Teleported " + source + " -> " +
-                    PortalLog.Describe(details));
                 Game.instance.IncrementPlayerStat(PlayerStatType.PortalsUsed);
             }
-            else
-            {
-                PortalLog.Throttled("travel:failed:" + selected, "travel",
-                    "TeleportTo returned false for target " + selected + ".");
-            }
-            return false;
         }
 
         // Reads the local player's saved destination for this source portal.
@@ -167,8 +161,6 @@ namespace Landoria.PortalSelector
         {
             if (ZoneSystem.instance.GetGlobalKey(GlobalKeys.NoPortals))
             {
-                PortalLog.Throttled("travel:world-disabled", "travel",
-                    "Blocked by NoPortals world key.");
                 player.Message(MessageHud.MessageType.Center, "$msg_blocked");
                 return false;
             }
@@ -177,15 +169,11 @@ namespace Landoria.PortalSelector
                  ZoneSystem.instance.GetGlobalKey(GlobalKeys.activeBosses, out float bosses)
                  && bosses > 0f))
             {
-                PortalLog.Throttled("travel:boss", "travel",
-                    "Blocked by NoBossPortals restriction.");
                 player.Message(MessageHud.MessageType.Center, "$msg_blockedbyboss");
                 return false;
             }
             if (!player.IsTeleportable(portal.m_allowAllItems))
             {
-                PortalLog.Throttled("travel:items", "travel",
-                    "Blocked by non-teleportable inventory items.");
                 player.Message(MessageHud.MessageType.Center, "$msg_noteleport");
                 return false;
             }

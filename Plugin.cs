@@ -1,70 +1,39 @@
 using BepInEx;
-using BepInEx.Configuration;
 using HarmonyLib;
 
 namespace Landoria.PortalSelector
 {
-    // Starts the portal selector and owns its logging configuration.
+    // Starts the portal selector and installs its game hooks.
     [BepInPlugin(PluginGuid, PluginName, PluginVersion)]
     public sealed class Plugin : BaseUnityPlugin
     {
         public const string PluginGuid = "Landoria.PortalSelector";
         public const string PluginName = "PortalSelector";
-        public const string PluginVersion = "0.1.0";
-        internal static Plugin Instance { get; private set; }
-        internal static ConfigEntry<bool> DetailedLogging { get; private set; }
+        public const string PluginVersion = "1.0.0";
         private Harmony _harmony;
 
-        // Binds settings and installs the game hooks.
+        // Installs the game hooks and logs one startup message.
         private void Awake()
         {
-            Instance = this;
-            DetailedLogging = Config.Bind("Diagnostics", "DetailedLogging", true,
-                "Log portal discovery, linking, catalog, names, choices, and travel.");
-            PortalLog.Initialize(Logger);
-            PortalLog.Info("lifecycle", "Started; detailed logging=" +
-                DetailedLogging.Value + ", cost multiplier=" +
-                PortalCost.CostMultiplier);
-            ConfigWatcher.Initialize(Config, Logger, PluginName, RestoreDefaults,
-                ApplyConfiguration);
+            Logger.LogInfo($"{PluginName} {PluginVersion} loaded.");
             _harmony = new Harmony(PluginGuid);
             _harmony.PatchAll();
             Game.m_playerInitialSpawn += PortalDirectory.BeginValidation;
         }
 
-        // Processes file changes and pending portal directory requests.
+        // Processes pending portal directory requests and dialog changes.
         private void Update()
         {
-            ConfigWatcher.Update();
             PortalDirectory.Update();
             PortalDialog.Update();
         }
 
-        // Restores the single setting when the config file is deleted.
-        private void RestoreDefaults()
-        {
-            DetailedLogging.Value = true;
-            Config.Save();
-            ConfigWatcher.IgnoreCurrentFileVersion();
-        }
-
-        // Applies the live logging setting after a configuration reload.
-        private void ApplyConfiguration()
-        {
-            PortalLog.Info("config", "Reloaded; detailed logging=" +
-                DetailedLogging.Value + ".");
-        }
-
-        // Removes only this mod's hooks and watcher.
+        // Removes this mod's hooks when BepInEx unloads it.
         private void OnDestroy()
         {
-            PortalLog.Info("lifecycle", "Stopping PortalSelector.");
             Game.m_playerInitialSpawn -= PortalDirectory.BeginValidation;
             PortalDialog.Close();
-            ConfigWatcher.Dispose();
             _harmony?.UnpatchSelf();
-            PortalLog.Dispose();
-            Instance = null;
         }
     }
 }

@@ -5,7 +5,7 @@ using UnityEngine;
 namespace Landoria.PortalSelector
 {
     // Keeps a per-character list of portals already observed by this client.
-    internal static class PortalDirectory
+    internal static partial class PortalDirectory
     {
         private const string CatalogPrefix = "Landoria.PortalSelector.Catalog.";
         private static readonly Dictionary<string, PortalRecord> Records =
@@ -24,7 +24,6 @@ namespace Landoria.PortalSelector
         // Schedules a native portal check after the character's first spawn.
         internal static void BeginValidation()
         {
-            PortalLog.Info("validation", "First spawn; checking saved portals.");
             Confirmed.Clear();
             PendingValidation.Clear();
             _validating = false;
@@ -60,165 +59,81 @@ namespace Landoria.PortalSelector
             LoadSession();
             bool changed = false;
             List<ZDO> portals = new List<ZDO>(ZDOMan.instance.GetPortalList());
-            PortalLog.Detail("scan", "Native portal list contains " +
-                portals.Count + " objects; character catalog has " +
-                Records.Count + ".");
-            HashSet<ZDOID> observed = new HashSet<ZDOID>();
-            for (int i = 0; i < portals.Count; i++)
-            {
-                ZDO portal = portals[i];
-                if (!observed.Add(portal.m_uid)) { continue; }
-                changed |= UpdateRecord(portal);
-                ZDOID targetId = portal.GetConnectionZDOID(
-                    ZDOExtraData.ConnectionType.Portal);
-                if (targetId == ZDOID.None) { continue; }
-                ZDO target = PortalConnection.GetTarget(targetId);
-                if (target != null) { portals.Add(target); }
-                else { QueueValidation(targetId); }
-            }
+            changed |= ScanObjects(portals);
             foreach (ZDO portal in portals)
             {
                 PlayerDestinations.InitializeFromShared(portal);
                 InitializeName(portal);
             }
+            changed |= RefreshBiomes();
+            PlayerPortalNames.EnsureUniqueNames(Records.Values);
+            if (changed)
+            {
+                PlayerPortalCatalog.Save(_player, _catalogKey, Records);
+            }
+        }
+
+        // Adds native portal objects and requests linked objects not yet present.
+        private static bool ScanObjects(List<ZDO> portals)
+        {
+            bool changed = false;
+            HashSet<ZDOID> observed = new HashSet<ZDOID>();
+            for (int i = 0; i < portals.Count; i++)
+            {
+                ZDO portal = portals[i];
+                if (!observed.Add(portal.m_uid))
+                {
+                    continue;
+                }
+                changed |= UpdateRecord(portal);
+                ZDOID targetId = portal.GetConnectionZDOID(
+                    ZDOExtraData.ConnectionType.Portal);
+                if (targetId == ZDOID.None)
+                {
+                    continue;
+                }
+                ZDO target = PortalConnection.GetTarget(targetId);
+                if (target != null)
+                {
+                    portals.Add(target);
+                }
+                else
+                {
+                    QueueValidation(targetId);
+                }
+            }
+            return changed;
+        }
+
+        // Corrects saved biomes with the current world biome map.
+        private static bool RefreshBiomes()
+        {
+            bool changed = false;
             foreach (PortalRecord record in Records.Values)
             {
                 Heightmap.Biome biome = ResolveBiome(record.Position);
-                if (record.Biome == biome) { continue; }
-                PortalLog.Detail("biome", "Corrected " +
-                    PortalLog.Describe(record) + " from " + record.Biome +
-                    " to " + biome + ".");
+                if (record.Biome == biome)
+                {
+                    continue;
+                }
                 record.Biome = biome;
                 changed = true;
             }
-            PlayerPortalNames.EnsureUniqueNames(Records.Values);
-            if (changed) { PlayerPortalCatalog.Save(_player, _catalogKey, Records); }
+            return changed;
         }
 
         // Copies a tag now and adds a pair suffix when its partner is known.
         private static void InitializeName(ZDO portal)
         {
             PortalRecord record = Find(portal.m_uid);
-            if (record == null) { return; }
+            if (record == null)
+            {
+                return;
+            }
             ZDOID targetId = portal.GetConnectionZDOID(
                 ZDOExtraData.ConnectionType.Portal);
             PortalRecord partner = targetId == ZDOID.None ? null : Find(targetId);
             PlayerPortalNames.InitializeFromShared(record, partner);
-        }
-
-        // Schedules linked portals through the existing 250 ms request queue.
-        private static void QueueValidation(ZDOID id)
-        {
-            if (!PortalConnection.TimedOut(id) &&
-                !PendingValidation.Contains(id))
-            {
-                PendingValidation.Enqueue(id);
-                _validating = true;
-                _validationDeadline = Time.unscaledTime + 10f;
-                PortalLog.Detail("validation", "Queued connected/known ZDO " +
-                    id + "; pending=" + PendingValidation.Count + ".");
-            }
-        }
-
-        // Opens immediately with destinations confirmed in this session.
-        internal static void Request(ZDOID origin)
-        {
-            _nextScan = 0f;
-            Update();
-            List<PortalRecord> available = new List<PortalRecord>();
-            foreach (PortalRecord record in Records.Values)
-            {
-                if (record.Id == origin || Confirmed.Contains(record.Id))
-                {
-                    available.Add(record);
-                }
-            }
-            if (available.Count == 1 && _validating)
-            {
-                PortalLog.Detail("dialog", "Waiting for destinations from " +
-                    origin + "; pending=" + PendingValidation.Count + ".");
-                Player.m_localPlayer.Message(MessageHud.MessageType.Center,
-                    "Checking destinations in the background. Try again shortly.");
-                return;
-            }
-            PortalDialog.Open(origin, UniqueRecords(origin, available));
-            PortalLog.Detail("dialog", "Requested destination dialog from " +
-                origin + "; confirmed choices=" + available.Count + ".");
-        }
-
-        // Requests the saved portal IDs from the world host once per spawn.
-        private static void StartValidation()
-        {
-            _beginRequested = false;
-            _validationDeadline = Time.unscaledTime + 10f;
-            _nextValidationRequest = Time.unscaledTime;
-            _validating = true;
-            foreach (PortalRecord record in Records.Values)
-            {
-                if (!Confirmed.Contains(record.Id))
-                {
-                    QueueValidation(record.Id);
-                }
-            }
-            _nextConfirmationCheck = 0f;
-            PortalLog.Detail("validation", "Started; catalog=" +
-                Records.Count + ", pending=" + PendingValidation.Count + ".");
-        }
-
-        // Sends at most one catalog request every 250 milliseconds.
-        private static void DispatchValidation()
-        {
-            if (!_validating || PendingValidation.Count == 0 ||
-                Time.unscaledTime < _nextValidationRequest)
-            {
-                return;
-            }
-            ZDOID id = PendingValidation.Dequeue();
-            _nextValidationRequest = Time.unscaledTime + 0.25f;
-            if (!Confirmed.Contains(id) && PortalConnection.GetTarget(id) == null)
-            {
-                PortalLog.Detail("validation", "Dispatching ZDO " + id +
-                    "; remaining=" + PendingValidation.Count + ".");
-                PortalConnection.Request(id, FindById(id) != null);
-                _validationDeadline = Time.unscaledTime + 10f;
-            }
-        }
-
-        // Adds native portal objects received during the background check.
-        private static void RefreshConfirmed()
-        {
-            if (Time.unscaledTime < _nextConfirmationCheck)
-            {
-                return;
-            }
-            _nextConfirmationCheck = Time.unscaledTime + (_validating ? 0.5f : 5f);
-            List<ZDOID> expired = new List<ZDOID>();
-            foreach (PortalRecord record in Records.Values)
-            {
-                if (PortalConnection.GetTarget(record.Id) != null)
-                {
-                    if (Confirmed.Add(record.Id))
-                    {
-                        PortalLog.Detail("validation", "Confirmed " +
-                            PortalLog.Describe(record));
-                    }
-                }
-                else if (PortalConnection.TimedOut(record.Id))
-                {
-                    expired.Add(record.Id);
-                }
-            }
-            foreach (ZDOID id in expired)
-            {
-                Forget(id, false);
-            }
-            if (_validating && PendingValidation.Count == 0 &&
-                Time.unscaledTime >= _validationDeadline)
-            {
-                _validating = false;
-                PortalLog.Detail("validation", "Finished background checks; " +
-                    Confirmed.Count + " portals confirmed.");
-            }
         }
 
         // Collapses records with the same exact portal identity.
@@ -273,7 +188,10 @@ namespace Landoria.PortalSelector
         {
             foreach (PortalRecord record in Records.Values)
             {
-                if (record.Id == id) { return record; }
+                if (record.Id == id)
+                {
+                    return record;
+                }
             }
             return null;
         }
@@ -317,8 +235,6 @@ namespace Landoria.PortalSelector
             Confirmed.Remove(id);
             if (removed != null && Records.Remove(PortalIdentity.Key(removed)))
             {
-                PortalLog.Detail("catalog", (destroyed ? "Destroyed " :
-                    "Expired network lookup for ") + PortalLog.Describe(removed));
                 PlayerPortalCatalog.Save(_player, _catalogKey, Records);
             }
             if (destroyed && removed != null)
@@ -348,8 +264,6 @@ namespace Landoria.PortalSelector
             PendingValidation.Clear();
             _validating = false;
             PlayerPortalCatalog.Load(_player, _catalogKey, Records);
-            PortalLog.Info("session", "Character catalog ready for " + key +
-                "; known portals=" + Records.Count + ".");
         }
 
         // Updates one known portal from current object data.
@@ -378,11 +292,6 @@ namespace Landoria.PortalSelector
                 old.Biome != record.Biome;
             Records[identity] = record;
             Confirmed.Add(record.Id);
-            if (changed)
-            {
-                PortalLog.Detail("discovery", (old == null ? "Added " :
-                    "Updated ") + PortalLog.Describe(record));
-            }
             return changed;
         }
 
@@ -390,7 +299,10 @@ namespace Landoria.PortalSelector
         private static Heightmap.Biome ResolveBiome(Vector3 position)
         {
             Heightmap.Biome loaded = Heightmap.FindBiome(position);
-            if (loaded != Heightmap.Biome.None) { return loaded; }
+            if (loaded != Heightmap.Biome.None)
+            {
+                return loaded;
+            }
             return WorldGenerator.instance.GetBiomeSector(position).Biome;
         }
 
@@ -406,9 +318,10 @@ namespace Landoria.PortalSelector
                     break;
                 }
             }
-            if (stale == null) { return false; }
-            PortalLog.Detail("catalog", "Removing stale identity " + stale +
-                " because ZDO " + id + " now belongs to " + identity + ".");
+            if (stale == null)
+            {
+                return false;
+            }
             Records.Remove(stale);
             return true;
         }

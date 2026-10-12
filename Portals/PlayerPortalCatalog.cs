@@ -14,7 +14,6 @@ namespace Landoria.PortalSelector
             if (!player.m_customData.TryGetValue(key, out string value) ||
                 string.IsNullOrEmpty(value))
             {
-                PortalLog.Detail("catalog", "No saved catalog for " + key + ".");
                 return;
             }
             try
@@ -25,16 +24,10 @@ namespace Landoria.PortalSelector
                 {
                     PortalRecord record = ReadRecord(package);
                     records[PortalIdentity.Key(record)] = record;
-                    PortalLog.Detail("catalog", "Loaded " +
-                        PortalLog.Describe(record));
                 }
-                PortalLog.Info("catalog", "Loaded " + records.Count +
-                    " portals from character data for " + key + ".");
             }
-            catch (Exception exception)
+            catch (Exception)
             {
-                PortalLog.Warning("catalog", "Could not load catalog: " +
-                    exception.Message);
                 records.Clear();
             }
         }
@@ -52,15 +45,10 @@ namespace Landoria.PortalSelector
                     WriteRecord(package, record);
                 }
                 player.m_customData[key] = Convert.ToBase64String(package.GetArray());
-                PortalLog.Detail("catalog", "Staged " + records.Count +
-                    " portals in character memory (" +
-                    player.m_customData[key].Length +
-                    " encoded characters); normal character save will persist them.");
             }
-            catch (Exception exception)
+            catch (Exception)
             {
-                PortalLog.Warning("catalog", "Could not update catalog: " +
-                    exception.Message);
+                // The optional catalog must not interrupt Valheim's save flow.
             }
         }
 

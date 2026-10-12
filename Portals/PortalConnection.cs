@@ -9,14 +9,11 @@ namespace Landoria.PortalSelector
         internal enum State { None, Connecting, Connected, Unavailable }
         private static readonly Dictionary<ZDOID, float> Requests =
             new Dictionary<ZDOID, float>();
-        private static readonly HashSet<ZDOID> Expired = new HashSet<ZDOID>();
 
         // Clears request timers when Valheim starts a different world session.
         internal static void Reset()
         {
             Requests.Clear();
-            Expired.Clear();
-            PortalLog.Detail("connection", "Cleared network request state.");
         }
 
         // Resolves the destination only after the client receives its live ZDO.
@@ -45,9 +42,6 @@ namespace Landoria.PortalSelector
                 return;
             }
             Requests[id] = Time.unscaledTime;
-            Expired.Remove(id);
-            PortalLog.Detail("connection", "Requesting portal ZDO " + id +
-                (force ? " (forced catalog validation)." : "."));
             ZDOMan.instance.RequestZDO(id);
         }
 
@@ -70,13 +64,8 @@ namespace Landoria.PortalSelector
         // A requested portal that never arrived is no longer a usable destination.
         internal static bool TimedOut(ZDOID id)
         {
-            bool expired = Requests.TryGetValue(id, out float attempted) &&
+            return Requests.TryGetValue(id, out float attempted) &&
                 Time.unscaledTime - attempted >= 10f && GetTarget(id) == null;
-            if (expired && Expired.Add(id))
-            {
-                PortalLog.Detail("connection", "Portal ZDO request expired: " + id);
-            }
-            return expired;
         }
     }
 }

@@ -42,18 +42,12 @@ namespace Landoria.PortalSelector
                 }
                 if (InUse(player, record, personalName))
                 {
-                    PortalLog.Detail("name", "Rejected duplicate personal name \"" +
-                        PortalLog.Clean(personalName) + "\" for " +
-                        PortalLog.Describe(record));
                     Player.m_localPlayer.Message(MessageHud.MessageType.Center,
                         "Ce nom est déjà utilisé par un autre portail.");
                     return false;
                 }
                 player.m_customData[Key(record)] = personalName;
                 player.m_customData.Remove(AutoKey(record));
-                PortalLog.Detail("name", "Set personal name \"" +
-                    PortalLog.Clean(name?.Trim()) + "\" for " +
-                    PortalLog.Describe(record));
                 return true;
             }
             return false;
@@ -77,12 +71,13 @@ namespace Landoria.PortalSelector
                     record, partner);
                 return;
             }
-            if (HasPersonalName(player, record)) { return; }
+            if (HasPersonalName(player, record))
+            {
+                return;
+            }
             string name = UniqueName(player, record, InitialName(record, partner));
             player.m_customData[key] = name;
             player.m_customData[autoKey] = name;
-            PortalLog.Detail("name", "Copied shared tag as personal name \"" +
-                PortalLog.Clean(name) + "\" for " + PortalLog.Describe(record));
         }
 
         // Adds a suffix later only if the player kept the generated name.
@@ -94,19 +89,19 @@ namespace Landoria.PortalSelector
                 current != automatic)
             {
                 player.m_customData.Remove(autoKey);
-                PortalLog.Detail("name", "Stopped automatic naming for " +
-                    PortalLog.Describe(record) + "; current name changed.");
                 return;
             }
-            if (partner == null) { return; }
+            if (partner == null)
+            {
+                return;
+            }
             string name = UniqueName(player, record, InitialName(record, partner));
-            if (current == name) { return; }
+            if (current == name)
+            {
+                return;
+            }
             player.m_customData[key] = name;
             player.m_customData[autoKey] = name;
-            PortalLog.Detail("name", "Completed paired name \"" +
-                PortalLog.Clean(name) + "\" for " +
-                PortalLog.Describe(record) + " with " +
-                PortalLog.Describe(partner));
         }
 
         // Keeps the shared tag intact and adds the pair suffix when applicable.
@@ -116,7 +111,10 @@ namespace Landoria.PortalSelector
                 "_1" : "_2";
             string tag = record.Tag.Trim();
             int available = MaxLength - suffix.Length;
-            if (tag.Length > available) { tag = tag.Substring(0, available); }
+            if (tag.Length > available)
+            {
+                tag = tag.Substring(0, available);
+            }
             return tag + suffix;
         }
 
@@ -124,7 +122,10 @@ namespace Landoria.PortalSelector
         internal static void EnsureUniqueNames(IEnumerable<PortalRecord> records)
         {
             Player player = Player.m_localPlayer;
-            if (player == null || ZNet.instance == null) { return; }
+            if (player == null || ZNet.instance == null)
+            {
+                return;
+            }
             var ordered = records.Where(r => !string.IsNullOrWhiteSpace(Get(r.Id)))
                 .OrderBy(r => player.m_customData.ContainsKey(AutoKey(r)) ? 1 : 0)
                 .ThenBy(r => PortalIdentity.Key(r), StringComparer.Ordinal);
@@ -132,7 +133,10 @@ namespace Landoria.PortalSelector
             foreach (PortalRecord record in ordered)
             {
                 string current = Get(record.Id);
-                if (used.Add(current)) { continue; }
+                if (used.Add(current))
+                {
+                    continue;
+                }
                 string replacement = UniqueName(current, used);
                 player.m_customData[Key(record)] = replacement;
                 if (player.m_customData.ContainsKey(AutoKey(record)))
@@ -140,16 +144,16 @@ namespace Landoria.PortalSelector
                     player.m_customData[AutoKey(record)] = replacement;
                 }
                 used.Add(replacement);
-                PortalLog.Detail("name", "Resolved duplicate \"" +
-                    PortalLog.Clean(current) + "\" as \"" +
-                    PortalLog.Clean(replacement) + "\" for " +
-                    PortalLog.Describe(record));
             }
         }
 
+        // Checks whether another portal already owns this personal name.
         private static bool InUse(Player player, PortalRecord record, string name)
         {
-            if (string.IsNullOrWhiteSpace(name)) { return false; }
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                return false;
+            }
             string prefix = Prefix + ZNet.instance.GetWorldUID() + ".";
             string ownKey = Key(record);
             string ownLegacy = LegacyKey(record);
@@ -159,10 +163,14 @@ namespace Landoria.PortalSelector
                 string.Equals(entry.Value, name, StringComparison.OrdinalIgnoreCase));
         }
 
+        // Adds a suffix when a generated name is already in use.
         private static string UniqueName(Player player, PortalRecord record,
             string proposed)
         {
-            if (!InUse(player, record, proposed)) { return proposed; }
+            if (!InUse(player, record, proposed))
+            {
+                return proposed;
+            }
             string prefix = Prefix + ZNet.instance.GetWorldUID() + ".";
             var used = new HashSet<string>(player.m_customData.Where(entry =>
                 entry.Key.StartsWith(prefix, StringComparison.Ordinal) &&
@@ -171,6 +179,7 @@ namespace Landoria.PortalSelector
             return UniqueName(proposed, used);
         }
 
+        // Finds the first free numbered form of a name.
         private static string UniqueName(string proposed, HashSet<string> used)
         {
             for (int number = 2; ; number++)
@@ -179,7 +188,10 @@ namespace Landoria.PortalSelector
                 string head = proposed.Substring(0,
                     Math.Min(proposed.Length, MaxLength - suffix.Length)).TrimEnd();
                 string candidate = head + suffix;
-                if (!used.Contains(candidate)) { return candidate; }
+                if (!used.Contains(candidate))
+                {
+                    return candidate;
+                }
             }
         }
 
@@ -199,7 +211,10 @@ namespace Landoria.PortalSelector
         {
             int order = string.CompareOrdinal(PortalIdentity.Key(record),
                 PortalIdentity.Key(partner));
-            if (order != 0) { return order < 0; }
+            if (order != 0)
+            {
+                return order < 0;
+            }
             if (record.Id.UserID != partner.Id.UserID)
             {
                 return record.Id.UserID < partner.Id.UserID;
@@ -214,8 +229,6 @@ namespace Landoria.PortalSelector
             {
                 Player.m_localPlayer.m_customData.Remove(Key(record));
                 Player.m_localPlayer.m_customData.Remove(AutoKey(record));
-                PortalLog.Detail("name", "Removed personal name for " +
-                    PortalLog.Describe(record));
                 if (!PortalDirectory.HasOtherLegacyIdentity(record))
                 {
                     Player.m_localPlayer.m_customData.Remove(LegacyKey(record));

@@ -135,8 +135,6 @@ namespace Landoria.PortalSelector
         private static void Select(ZDOID id)
         {
             _selected = id;
-            PortalLog.Detail("dialog", "Highlighted destination " +
-                PortalLog.Describe(PortalDirectory.Find(id)));
             _menu.SetActive(false);
             RefreshChoice();
         }

@@ -35,9 +35,6 @@ namespace Landoria.PortalSelector
                 ZNet.instance != null)
             {
                 player.m_customData[Key(source)] = PortalIdentity.Key(target);
-                PortalLog.Detail("destination", "Selected " +
-                    PortalLog.Describe(source) + " -> " +
-                    PortalLog.Describe(target) + "; staged in character memory.");
             }
         }
 
@@ -58,9 +55,6 @@ namespace Landoria.PortalSelector
             if (target != null)
             {
                 player.m_customData[Key(source)] = PortalIdentity.Key(target);
-                PortalLog.Detail("destination", "Copied vanilla link " +
-                    PortalLog.Describe(source) + " -> " +
-                    PortalLog.Describe(target));
             }
         }
 
@@ -92,8 +86,6 @@ namespace Landoria.PortalSelector
             {
                 player.m_customData[key] = "";
             }
-            PortalLog.Detail("destination", "Cleared " + affected.Count +
-                " personal routes involving " + PortalLog.Describe(portal));
         }
 
         // Namespaces the physical portal identity to the active world.

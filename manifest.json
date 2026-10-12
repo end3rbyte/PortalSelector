@@ -1,0 +1,9 @@
+{
+  "name": "PortalSelector",
+  "version_number": "1.0.0",
+  "website_url": "https://github.com/end3rbyte/PortalSelector",
+  "description": "Client-side portal selector with personal names and destinations saved with your character.",
+  "dependencies": [
+    "denikson-BepInExPack_Valheim-5.4.2351"
+  ]
+}
