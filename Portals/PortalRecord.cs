@@ -6,10 +6,11 @@ namespace Landoria.PortalSelector
     internal sealed class PortalRecord
     {
         internal ZDOID Id;
+        internal string Guid;
+        internal bool Active = true;
         internal string Tag;
-        internal Vector3 Position;
+        internal PortalMetadata Metadata = new PortalMetadata();
         internal Quaternion Rotation;
-        internal Heightmap.Biome Biome;
         internal bool AllowAllItems;
         internal float ExitDistance;
     }

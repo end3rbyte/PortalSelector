@@ -21,24 +21,34 @@ namespace Landoria.PortalSelector
         private static GuiInputField _input;
         private static Button _choiceButton;
         private static GameObject _menu;
+        private static GameObject _menuBlocker;
         private static ZDOID _origin;
         private static ZDOID _selected;
         private static ZDOID _committed;
-        private static PortalConnection.State _lastState;
         private static List<PortalRecord> _options;
+        private const float PickerHeightIncrease = 16f;
+        private const float ExtraDialogHeight = 32f;
+        private const float TitleSpacing = 2f;
+        private const float ActionSpacing = 12f;
+        internal static bool IsOpen => _owner != null && _panel != null &&
+            _owner.m_panel == _panel && _panel.activeInHierarchy;
 
-        // Opens a native-style dialog sorted by personal name.
+        // Opens a native-style dialog grouped by biome and map-center distance.
         internal static void Open(ZDOID origin, List<PortalRecord> records)
         {
-            if (TextInput.instance == null || !records.Any(r => r.Id == origin))
+            if (TextInput.instance == null ||
+                !records.Any(r => r.Id == origin && Available(r)))
             {
                 return;
             }
             _origin = origin;
-            _options = records.Where(r => r.Id != origin)
-                .OrderBy(r => PortalDisplay.PersonalName(r.Id),
+            _options = records.Where(r => r.Id != origin && Available(r))
+                .OrderBy(r => BiomeOrder(r.Metadata.Biome))
+                .ThenBy(r => r.Metadata.Position.x * r.Metadata.Position.x +
+                    r.Metadata.Position.z * r.Metadata.Position.z)
+                .ThenBy(r => PortalDisplay.PersonalName(r.Id),
                     System.StringComparer.CurrentCultureIgnoreCase)
-                .ThenBy(r => r.Biome.ToString()).ToList();
+                .ToList();
             _committed = PlayerDestinations.Get(origin);
             _selected = _committed;
             if (_options.Count == 0)
@@ -52,18 +62,73 @@ namespace Landoria.PortalSelector
             RefreshChoice();
         }
 
+        // Sorts biomes in the usual exploration order.
+        private static int BiomeOrder(Heightmap.Biome biome)
+        {
+            switch (biome.ToString())
+            {
+                case "Meadows": return 0;
+                case "BlackForest": return 1;
+                case "Swamp": return 2;
+                case "Mountain": return 3;
+                case "Plains": return 4;
+                case "Mistlands": return 5;
+                case "AshLands": return 6;
+                case "DeepNorth": return 7;
+                case "Ocean": return 8;
+                default: return 9;
+            }
+        }
+
         // Stores the current choice after the native OK action.
         internal static void Confirm()
         {
             if (_selected != ZDOID.None && _options != null &&
-                _options.Exists(record => record.Id == _selected))
+                _options.Exists(record => record.Id == _selected &&
+                    Available(record)))
             {
+                ZDOID previous = _committed;
                 PlayerDestinations.Set(_origin, _selected);
                 _committed = _selected;
-                PortalConnection.Request(_selected);
+                PortalPreviousDestinationCheck.Cancel(_committed);
+                if (previous != ZDOID.None && previous != _committed)
+                {
+                    PortalPreviousDestinationCheck.Begin(previous);
+                }
                 Player.m_localPlayer?.Message(MessageHud.MessageType.TopLeft,
-                    "Portal destination selected. Connecting...");
+                    "Portal destination selected.");
             }
+        }
+
+        // Removes an option immediately when a background check marks it inactive.
+        internal static void OnPortalInactive(ZDOID id)
+        {
+            if (_options == null || _options.RemoveAll(record => record.Id == id) == 0)
+            {
+                return;
+            }
+            if (_selected == id)
+            {
+                _selected = ZDOID.None;
+            }
+            if (_committed == id)
+            {
+                _committed = ZDOID.None;
+            }
+            RefreshChoice();
+            if (IsOpen && _menu != null && _menu.activeSelf)
+            {
+                if (_options.Count == 0) HideMenu();
+                else PopulateMenu();
+            }
+        }
+
+        // Confirms that a saved option still belongs to an active record.
+        private static bool Available(PortalRecord option)
+        {
+            PortalRecord current = PortalDirectory.Find(option.Id);
+            return option.Active && current != null && current.Active &&
+                current.Guid == option.Guid;
         }
 
         // Restores the vanilla dialog references during plugin shutdown.
@@ -80,40 +145,26 @@ namespace Landoria.PortalSelector
                 Object.Destroy(_panel);
             }
             _panel = null;
+            _menu = null;
+            _menuBlocker = null;
             _owner = null;
-        }
-
-        // Refreshes connection text when a native destination request completes.
-        internal static void Update()
-        {
-            if (_panel == null || !_panel.activeInHierarchy ||
-                _committed == ZDOID.None)
-            {
-                return;
-            }
-            PortalConnection.State state = PortalConnection.GetState(_committed);
-            if (state == _lastState)
-            {
-                return;
-            }
-            _lastState = state;
-            RefreshChoice();
-            if (_menu != null && _menu.activeSelf)
-            {
-                PopulateMenu();
-            }
         }
 
         // Swaps only our request to a copy of Valheim's text dialog.
         [HarmonyPatch(typeof(TextInput), nameof(TextInput.RequestText))]
         [HarmonyPrefix]
+        [HarmonyAfter("Landoria.NearbyStorage")]
         private static void BeforeRequest(TextInput __instance, TextReceiver sign)
         {
-            if (_owner != __instance)
+            bool ours = sign is PortalSelectionReceiver;
+            if (!ours && (_owner != __instance || __instance.m_panel != _panel))
+            {
+                return;
+            }
+            if (ours && _owner != __instance)
             {
                 Reset(__instance);
             }
-            bool ours = sign is PortalSelectionReceiver;
             if (ours && _panel == null)
             {
                 Create();
@@ -131,8 +182,7 @@ namespace Landoria.PortalSelector
             __instance.m_inputField = ours ? _input : _originalInput;
             if (ours)
             {
-                _menu.SetActive(false);
-                _lastState = PortalConnection.State.None;
+                HideMenu();
             }
         }
 
@@ -165,7 +215,26 @@ namespace Landoria.PortalSelector
                 _panel = null;
                 return;
             }
+            SpaceDialogVertically();
             CreatePicker();
+        }
+
+        // Adds space between the destination picker, title, and action buttons.
+        private static void SpaceDialogVertically()
+        {
+            RectTransform panel = _panel.transform as RectTransform;
+            if (panel == null)
+            {
+                return;
+            }
+            panel.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical,
+                panel.rect.height + ExtraDialogHeight);
+            _topic.transform.position += panel.TransformVector(new Vector3(0f, TitleSpacing, 0f));
+            foreach (Button action in panel.GetComponentsInChildren<Button>(true))
+            {
+                action.transform.position += panel.TransformVector(
+                    new Vector3(0f, -ActionSpacing, 0f));
+            }
         }
 
         // Locates a cloned control by its relative native-panel path.
@@ -194,8 +263,8 @@ namespace Landoria.PortalSelector
             RectTransform rect = copy.transform as RectTransform;
             rect.anchorMin = field.anchorMin;
             rect.anchorMax = field.anchorMax;
-            rect.offsetMin = field.offsetMin;
-            rect.offsetMax = field.offsetMax;
+            rect.offsetMin = field.offsetMin - new Vector2(0f, PickerHeightIncrease / 2f);
+            rect.offsetMax = field.offsetMax + new Vector2(0f, PickerHeightIncrease / 2f);
             _choiceButton = copy.GetComponent<Button>();
             _choiceButton.onClick = new Button.ButtonClickedEvent();
             _choiceButton.onClick.AddListener(ToggleMenu);
@@ -211,14 +280,16 @@ namespace Landoria.PortalSelector
             {
                 return;
             }
-            PortalRecord record = _options?.Find(item => item.Id == _selected);
-            string label = record == null ? "Select a portal ▼" :
-                ChoiceLabel(record) + " ▼";
+            PortalRecord record = _options?.Find(item =>
+                item.Id == _selected && Available(item));
+            string label = record == null ? "Select a portal" : ChoiceLabel(record);
             foreach (TMP_Text text in _choiceButton.GetComponentsInChildren<TMP_Text>(true))
             {
                 text.text = label;
                 text.enableAutoSizing = true;
-                text.fontSizeMin = 12f;
+                text.fontSize = 20f;
+                text.fontSizeMin = 16f;
+                text.fontSizeMax = 20f;
             }
         }
 
@@ -229,11 +300,8 @@ namespace Landoria.PortalSelector
             {
                 return "";
             }
-            PortalConnection.State state = PortalConnection.GetState(id);
-            return state == PortalConnection.State.Connected ? " — " +
-                Localization.instance.Localize("$piece_portal_connected") :
-                state == PortalConnection.State.Connecting ? " — Connecting..." :
-                " — Unavailable";
+            return " — " + Localization.instance.Localize(
+                "$piece_portal_connected");
         }
     }
 }

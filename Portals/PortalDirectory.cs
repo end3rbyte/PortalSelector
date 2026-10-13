@@ -7,77 +7,28 @@ namespace Landoria.PortalSelector
     // Keeps a per-character list of portals already observed by this client.
     internal static partial class PortalDirectory
     {
-        private const string CatalogPrefix = "Landoria.PortalSelector.Catalog.";
+        private const string CatalogPrefix = "Landoria.PortalSelector.CatalogGuidV1.";
+        internal const string PortalGuidKey = "Landoria.PortalSelector.Guid";
         private static readonly Dictionary<string, PortalRecord> Records =
             new Dictionary<string, PortalRecord>();
-        private static readonly HashSet<ZDOID> Confirmed = new HashSet<ZDOID>();
-        private static readonly Queue<ZDOID> PendingValidation = new Queue<ZDOID>();
         private static Player _player;
-        private static Player _clearedPlayer;
         private static string _catalogKey;
         private static float _nextScan;
-        private static float _nextValidationRequest;
-        private static float _validationDeadline;
-        private static float _nextConfirmationCheck;
-        private static bool _beginRequested;
-        private static bool _validating;
-
-        // Schedules a native portal check after the character's first spawn.
-        internal static void BeginValidation()
-        {
-            Confirmed.Clear();
-            PendingValidation.Clear();
-            _validating = false;
-            _nextScan = 0f;
-            _beginRequested = true;
-        }
 
         // Scans portals currently known to the client every few seconds.
         internal static void Update()
         {
-            if (_clearedPlayer != null)
-            {
-                if (Player.m_localPlayer == null ||
-                    ReferenceEquals(Player.m_localPlayer, _clearedPlayer))
-                {
-                    return;
-                }
-                _clearedPlayer = null;
-            }
             if (Player.m_localPlayer == null || ZNet.instance == null ||
                 ZDOMan.instance == null)
             {
-                _validating = false;
                 return;
             }
             if (Time.unscaledTime >= _nextScan)
             {
                 Scan();
             }
-            if (_beginRequested)
-            {
-                StartValidation();
-            }
-            DispatchValidation();
-            RefreshConfirmed();
+            UpdateValidation();
         }
-
-        // Pauses rediscovery until this character leaves the current session.
-        internal static void PauseAfterClear(Player player)
-        {
-            LoadSession();
-            _clearedPlayer = player;
-            Records.Clear();
-            Confirmed.Clear();
-            PendingValidation.Clear();
-            _validating = false;
-            _beginRequested = false;
-            PortalConnection.Reset();
-        }
-
-        // Reports whether this character has cleared portal data this session.
-        internal static bool IsPaused => _clearedPlayer != null &&
-            ReferenceEquals(Player.m_localPlayer, _clearedPlayer);
 
         // Records portals received in the client's current world state.
         private static void Scan()
@@ -89,7 +40,6 @@ namespace Landoria.PortalSelector
             changed |= ScanObjects(portals);
             foreach (ZDO portal in portals)
             {
-                PlayerDestinations.InitializeFromShared(portal);
                 InitializeName(portal);
             }
             changed |= RefreshBiomes();
@@ -100,7 +50,7 @@ namespace Landoria.PortalSelector
             }
         }
 
-        // Adds native portal objects and requests linked objects not yet present.
+        // Adds loaded portal objects and their loaded vanilla link partners.
         private static bool ScanObjects(List<ZDO> portals)
         {
             bool changed = false;
@@ -124,10 +74,6 @@ namespace Landoria.PortalSelector
                 {
                     portals.Add(target);
                 }
-                else
-                {
-                    QueueValidation(targetId);
-                }
             }
             return changed;
         }
@@ -138,12 +84,12 @@ namespace Landoria.PortalSelector
             bool changed = false;
             foreach (PortalRecord record in Records.Values)
             {
-                Heightmap.Biome biome = ResolveBiome(record.Position);
-                if (record.Biome == biome)
+                Heightmap.Biome biome = ResolveBiome(record.Metadata.Position);
+                if (record.Metadata.Biome == biome)
                 {
                     continue;
                 }
-                record.Biome = biome;
+                record.Metadata.Biome = biome;
                 changed = true;
             }
             return changed;
@@ -176,21 +122,21 @@ namespace Landoria.PortalSelector
                 {
                     continue;
                 }
-                float dx = record.Position.x - other.Position.x;
-                float dz = record.Position.z - other.Position.z;
+                float dx = record.Metadata.Position.x - other.Metadata.Position.x;
+                float dz = record.Metadata.Position.z - other.Metadata.Position.z;
                 nearest = Math.Min(nearest, dx * dx + dz * dz);
             }
             return nearest;
         }
 
-        // Collapses records with the same exact portal identity.
+        // Collapses records with the same portal GUID.
         private static List<PortalRecord> UniqueRecords(ZDOID origin,
             List<PortalRecord> candidates)
         {
             List<PortalRecord> result = new List<PortalRecord>();
             foreach (PortalRecord candidate in candidates)
             {
-                int index = result.FindIndex(record => SamePlace(record, candidate));
+                int index = result.FindIndex(record => SamePortal(record, candidate));
                 if (index < 0)
                 {
                     result.Add(candidate);
@@ -204,8 +150,8 @@ namespace Landoria.PortalSelector
             return result;
         }
 
-        // Keeps nearby portals distinct when any stored position bit differs.
-        private static bool SamePlace(PortalRecord first, PortalRecord second)
+        // Compares persistent portal identities.
+        private static bool SamePortal(PortalRecord first, PortalRecord second)
         {
             return PortalIdentity.Key(first) == PortalIdentity.Key(second);
         }
@@ -230,7 +176,7 @@ namespace Landoria.PortalSelector
             return FindById(id);
         }
 
-        // Resolves the temporary network ID within the saved identity catalog.
+        // Resolves a world object ID within the saved identity catalog.
         private static PortalRecord FindById(ZDOID id)
         {
             foreach (PortalRecord record in Records.Values)
@@ -243,52 +189,65 @@ namespace Landoria.PortalSelector
             return null;
         }
 
-        // Resolves exact and older rounded identities to a current portal ID.
-        internal static PortalRecord FindByIdentity(string identity)
+        // Resolves a portal GUID to its current world object ID.
+        internal static PortalRecord FindByGuid(string guid)
         {
             LoadSession();
-            PortalRecord result = null;
-            foreach (PortalRecord record in Records.Values)
-            {
-                if ((PortalIdentity.Key(record) == identity ||
-                     PortalIdentity.LegacyKey(record) == identity) &&
-                    (result == null || Prefer(record, result)))
-                {
-                    result = record;
-                }
-            }
-            return result;
+            Records.TryGetValue("g:" + guid, out PortalRecord record);
+            return record;
         }
 
-        // Protects older shared keys when another portal occupies the same 10 cm cell.
-        internal static bool HasOtherLegacyIdentity(PortalRecord portal)
-        {
-            foreach (PortalRecord record in Records.Values)
-            {
-                if (PortalIdentity.LegacyKey(record) ==
-                    PortalIdentity.LegacyKey(portal))
-                {
-                    return true;
-                }
-            }
-            return false;
-        }
-
-        // Removes a portal when Valheim confirms its destruction.
-        internal static void Forget(ZDOID id, bool destroyed = true)
+        // Exposes saved identities for personal-name conflict checks.
+        internal static List<PortalRecord> KnownRecords()
         {
             LoadSession();
-            PortalRecord removed = FindById(id);
-            Confirmed.Remove(id);
-            if (removed != null && Records.Remove(PortalIdentity.Key(removed)))
+            return new List<PortalRecord>(Records.Values);
+        }
+
+        // Retains an unanswered portal while hiding it from active destinations.
+        internal static bool MarkInactive(ZDOID id)
+        {
+            LoadSession();
+            PortalRecord record = FindById(id);
+            if (record == null || !record.Active)
             {
-                PlayerPortalCatalog.Save(_player, _catalogKey, Records);
+                return false;
             }
-            if (destroyed && removed != null)
+            record.Active = false;
+            PlayerPortalCatalog.Save(_player, _catalogKey, Records);
+            PortalDialog.OnPortalInactive(id);
+            Plugin.DebugLog("Catalog: inactive guid=" + record.Guid +
+                " zdo=" + record.Id + ".");
+            return true;
+        }
+
+        // Reuses an inactive identity when a rebuilt portal takes its name.
+        internal static bool RebindInactive(ZDOID inactiveId, ZDOID currentId)
+        {
+            LoadSession();
+            PortalRecord inactive = FindById(inactiveId);
+            PortalRecord current = FindById(currentId);
+            ZDO portal = PortalConnection.GetTarget(currentId);
+            if (inactive == null || inactive.Active || current == null ||
+                !current.Active || portal == null ||
+                portal.GetString(PortalGuidKey) != current.Guid)
             {
-                PlayerDestinations.Forget(removed);
-                PlayerPortalNames.Forget(removed);
+                return false;
             }
+            string guid = string.IsNullOrEmpty(inactive.Guid) ?
+                current.Guid : inactive.Guid;
+            if (!string.IsNullOrEmpty(guid))
+            {
+                portal.Set(PortalGuidKey, guid);
+            }
+            Records.Remove(PortalIdentity.CatalogKey(inactive));
+            Records.Remove(PortalIdentity.CatalogKey(current));
+            current.Guid = guid;
+            Records[PortalIdentity.CatalogKey(current)] = current;
+            PlayerPortalCatalog.Save(_player, _catalogKey, Records);
+            Plugin.DebugLog("Catalog: rebound guid=" + guid +
+                " oldZdo=" + inactiveId + " newZdo=" + currentId + ".");
+            return true;
         }
 
         // Changes the active catalog when the world or character changes.
@@ -307,10 +266,14 @@ namespace Landoria.PortalSelector
             _player = player;
             _catalogKey = key;
             Records.Clear();
-            Confirmed.Clear();
-            PendingValidation.Clear();
-            _validating = false;
-            PlayerPortalCatalog.Load(_player, _catalogKey, Records);
+            PlayerDestinations.Reset();
+            PortalConnection.Reset();
+            if (PlayerPortalCatalog.Load(_player, _catalogKey, Records))
+            {
+                PlayerPortalCatalog.Save(_player, _catalogKey, Records);
+            }
+            Plugin.DebugLog("Catalog: world session ready, records=" +
+                Records.Count + ".");
         }
 
         // Updates one known portal from current object data.
@@ -322,24 +285,78 @@ namespace Landoria.PortalSelector
             {
                 return false;
             }
+            string guid = portal.GetString(PortalGuidKey);
+            if (string.IsNullOrWhiteSpace(guid) && portal.IsOwner())
+            {
+                guid = Guid.NewGuid().ToString("N");
+                portal.Set(PortalGuidKey, guid);
+                Plugin.DebugLog("Portal: assigned guid=" + guid +
+                    " zdo=" + portal.m_uid + ".");
+            }
+            if (string.IsNullOrWhiteSpace(guid))
+            {
+                return false;
+            }
             PortalRecord record = new PortalRecord
             {
-                Id = portal.m_uid, Tag = portal.GetString(ZDOVars.s_tag),
-                Position = portal.GetPosition(), Rotation = portal.GetRotation(),
-                Biome = ResolveBiome(portal.GetPosition()),
+                Id = portal.m_uid, Guid = guid,
+                Tag = portal.GetString(ZDOVars.s_tag),
+                Metadata = new PortalMetadata
+                {
+                    Position = portal.GetPosition(),
+                    Biome = ResolveBiome(portal.GetPosition())
+                },
+                Rotation = portal.GetRotation(),
                 AllowAllItems = component.m_allowAllItems,
                 ExitDistance = component.m_exitDistance
             };
-            string identity = PortalIdentity.Key(record);
-            bool collided = RemoveIdCollision(record.Id, identity);
-            bool existed = Records.TryGetValue(identity, out PortalRecord old);
-            bool changed = collided || !existed ||
-                old.Id != record.Id || old.Tag != record.Tag ||
-                old.Position != record.Position || old.Rotation != record.Rotation ||
-                old.Biome != record.Biome;
-            Records[identity] = record;
-            Confirmed.Add(record.Id);
+            return StoreRecord(record);
+        }
+
+        // Refreshes an existing GUID record or adds a newly received portal.
+        private static bool StoreRecord(PortalRecord record)
+        {
+            string key = PortalIdentity.CatalogKey(record);
+            bool collided = PreserveIdCollision(record.Id, PortalIdentity.Key(record));
+            PortalRecord prior = FindById(record.Id);
+            bool replaced = prior != null &&
+                PortalIdentity.CatalogKey(prior) != key;
+            if (replaced)
+            {
+                Records.Remove(PortalIdentity.CatalogKey(prior));
+            }
+            bool existed = Records.TryGetValue(key, out PortalRecord old);
+            bool changed = collided || replaced || !existed ||
+                old.Id != record.Id || old.Guid != record.Guid ||
+                !old.Active ||
+                old.Tag != record.Tag ||
+                old.Metadata.Position != record.Metadata.Position ||
+                old.Rotation != record.Rotation ||
+                old.Metadata.Biome != record.Metadata.Biome;
+            Records[key] = record;
+            LogRecordChange(record, old, existed);
             return changed;
+        }
+
+        // Reports only discoveries, reactivations, and changed world object IDs.
+        private static void LogRecordChange(PortalRecord record,
+            PortalRecord old, bool existed)
+        {
+            if (!existed)
+            {
+                Plugin.DebugLog("Catalog: discovered guid=" + record.Guid +
+                    " zdo=" + record.Id + ".");
+            }
+            else if (!old.Active)
+            {
+                Plugin.DebugLog("Catalog: reactivated guid=" + record.Guid +
+                    " zdo=" + record.Id + ".");
+            }
+            else if (old.Id != record.Id)
+            {
+                Plugin.DebugLog("Catalog: zdo changed guid=" + record.Guid +
+                    " oldZdo=" + old.Id + " newZdo=" + record.Id + ".");
+            }
         }
 
         // Uses the loaded terrain when possible and the world's biome map elsewhere.
@@ -353,15 +370,16 @@ namespace Landoria.PortalSelector
             return WorldGenerator.instance.GetBiomeSector(position).Biome;
         }
 
-        // Drops a stale position if its old network ID now belongs elsewhere.
-        private static bool RemoveIdCollision(ZDOID id, string identity)
+        // Gives a remembered portal a spare ID when Valheim reuses its old ID.
+        private static bool PreserveIdCollision(ZDOID id, string guid)
         {
-            string stale = null;
+            PortalRecord stale = null;
             foreach (KeyValuePair<string, PortalRecord> entry in Records)
             {
-                if (entry.Value.Id == id && entry.Key != identity)
+                if (entry.Value.Id == id &&
+                    PortalIdentity.Key(entry.Value) != guid)
                 {
-                    stale = entry.Key;
+                    stale = entry.Value;
                     break;
                 }
             }
@@ -369,7 +387,12 @@ namespace Landoria.PortalSelector
             {
                 return false;
             }
-            Records.Remove(stale);
+            uint spare = uint.MaxValue;
+            while (FindById(new ZDOID(id.UserID, spare)) != null)
+            {
+                spare--;
+            }
+            stale.Id = new ZDOID(id.UserID, spare);
             return true;
         }
 

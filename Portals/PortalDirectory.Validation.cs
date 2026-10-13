@@ -3,113 +3,128 @@ using UnityEngine;
 
 namespace Landoria.PortalSelector
 {
-    // Checks known portal objects without blocking the main loop.
+    // Checks saved portals once when the player first spawns in a connection.
     internal static partial class PortalDirectory
     {
-        // Schedules linked portals through the existing 250 ms request queue.
-        private static void QueueValidation(ZDOID id)
+        private const float ValidationTimeout = 10f;
+        private static readonly Queue<string> ValidationQueue = new Queue<string>();
+        private static readonly Dictionary<string, float> ValidationPending =
+            new Dictionary<string, float>();
+        private static ZNet _validationSession;
+        private static bool _validationRequested;
+        private static bool _validationStarted;
+        private static float _nextValidationRequest;
+
+        // The game raises this event for the first player spawn.
+        internal static void BeginValidation()
         {
-            if (!PortalConnection.TimedOut(id) &&
-                !PendingValidation.Contains(id))
+            if (ZNet.instance != _validationSession)
             {
-                PendingValidation.Enqueue(id);
-                _validating = true;
-                _validationDeadline = Time.unscaledTime + 10f;
+                ResetValidation();
+                _validationSession = ZNet.instance;
+            }
+            if (!_validationStarted)
+            {
+                _validationRequested = true;
             }
         }
 
-        // Opens immediately with destinations confirmed in this session.
-        internal static void Request(ZDOID origin)
+        // Drops a pending pass when the client changes or leaves a world.
+        internal static void ResetValidation()
         {
-            if (IsPaused)
-            {
-                Player.m_localPlayer.Message(MessageHud.MessageType.Center,
-                    "Portal data cleared. Rejoin to rediscover portals.");
-                return;
-            }
-            _nextScan = 0f;
-            Update();
-            List<PortalRecord> available = new List<PortalRecord>();
-            foreach (PortalRecord record in Records.Values)
-            {
-                if (record.Id == origin || Confirmed.Contains(record.Id))
-                {
-                    available.Add(record);
-                }
-            }
-            if (available.Count == 1 && _validating)
-            {
-                Player.m_localPlayer.Message(MessageHud.MessageType.Center,
-                    "Checking destinations in the background. Try again shortly.");
-                return;
-            }
-            PortalDialog.Open(origin, UniqueRecords(origin, available));
+            ValidationQueue.Clear();
+            ValidationPending.Clear();
+            _validationSession = null;
+            _validationRequested = false;
+            _validationStarted = false;
+            _nextValidationRequest = 0f;
         }
 
-        // Requests the saved portal IDs from the world host once per spawn.
+        // Runs after the catalog has been loaded and the local player is ready.
+        private static void UpdateValidation()
+        {
+            if (ZNet.instance != _validationSession)
+            {
+                ResetValidation();
+                return;
+            }
+            if (_validationRequested && ZRoutedRpc.instance != null)
+            {
+                StartValidation();
+            }
+            DispatchValidation();
+            CheckValidation();
+        }
+
+        // Snapshots GUIDs so an ID change cannot validate another portal.
         private static void StartValidation()
         {
-            _beginRequested = false;
-            _validationDeadline = Time.unscaledTime + 10f;
+            _validationRequested = false;
+            _validationStarted = true;
             _nextValidationRequest = Time.unscaledTime;
-            _validating = true;
             foreach (PortalRecord record in Records.Values)
             {
-                if (!Confirmed.Contains(record.Id))
-                {
-                    QueueValidation(record.Id);
-                }
+                ValidationQueue.Enqueue(PortalIdentity.Key(record));
             }
-            _nextConfirmationCheck = 0f;
+            Plugin.DebugLog("Validation: first spawn, checking " +
+                ValidationQueue.Count + " saved portals.");
         }
 
-        // Sends at most one catalog request every 250 milliseconds.
+        // Requests one saved portal every 250 milliseconds.
         private static void DispatchValidation()
         {
-            if (!_validating || PendingValidation.Count == 0 ||
+            if (ValidationQueue.Count == 0 ||
                 Time.unscaledTime < _nextValidationRequest)
             {
                 return;
             }
-            ZDOID id = PendingValidation.Dequeue();
+            string guid = ValidationQueue.Dequeue();
             _nextValidationRequest = Time.unscaledTime + 0.25f;
-            if (!Confirmed.Contains(id) && PortalConnection.GetTarget(id) == null)
-            {
-                PortalConnection.Request(id, FindById(id) != null);
-                _validationDeadline = Time.unscaledTime + 10f;
-            }
-        }
-
-        // Adds native portal objects received during the background check.
-        private static void RefreshConfirmed()
-        {
-            if (Time.unscaledTime < _nextConfirmationCheck)
+            PortalRecord record = FindByGuid(guid);
+            if (record == null)
             {
                 return;
             }
-            _nextConfirmationCheck = Time.unscaledTime + (_validating ? 0.5f : 5f);
-            List<ZDOID> expired = new List<ZDOID>();
-            foreach (PortalRecord record in Records.Values)
+            if (PortalConnection.GetConfirmedTarget(record.Id) != null)
             {
-                if (PortalConnection.GetTarget(record.Id) != null)
-                {
-                    Confirmed.Add(record.Id);
-                }
-                else if (PortalConnection.TimedOut(record.Id))
-                {
-                    expired.Add(record.Id);
-                }
+                Plugin.DebugLog("Validation: already available guid=" + guid +
+                    " zdo=" + record.Id + ".");
+                return;
             }
-            foreach (ZDOID id in expired)
-            {
-                Forget(id, false);
-            }
-            if (_validating && PendingValidation.Count == 0 &&
-                Time.unscaledTime >= _validationDeadline)
-            {
-                _validating = false;
-            }
+            ValidationPending[guid] = Time.unscaledTime + ValidationTimeout;
+            Plugin.DebugLog("Validation: requesting guid=" + guid +
+                " zdo=" + record.Id + " timeout=10s.");
+            PortalConnection.Request(record.Id);
         }
 
+        // Keeps the native request active until the object arrives or its deadline passes.
+        private static void CheckValidation()
+        {
+            foreach (string guid in new List<string>(ValidationPending.Keys))
+            {
+                PortalRecord record = FindByGuid(guid);
+                if (record == null)
+                {
+                    ValidationPending.Remove(guid);
+                    continue;
+                }
+                if (PortalConnection.GetConfirmedTarget(record.Id) != null)
+                {
+                    ValidationPending.Remove(guid);
+                    Plugin.DebugLog("Validation: confirmed guid=" + guid +
+                        " zdo=" + record.Id + ".");
+                    continue;
+                }
+                if (Time.unscaledTime < ValidationPending[guid])
+                {
+                    PortalConnection.Request(record.Id);
+                    continue;
+                }
+                ValidationPending.Remove(guid);
+                Plugin.DebugLog("Validation: timed out guid=" + guid +
+                    " zdo=" + record.Id + ".");
+                MarkInactive(record.Id);
+            }
+        }
     }
 }

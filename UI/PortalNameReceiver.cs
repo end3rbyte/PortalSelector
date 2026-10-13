@@ -4,6 +4,7 @@ namespace Landoria.PortalSelector
     internal sealed class PortalNameReceiver : TextReceiver
     {
         private readonly ZDOID _id;
+        internal ZDOID Id => _id;
 
         // Binds the text dialog to one portal.
         internal PortalNameReceiver(ZDOID id)
@@ -20,6 +21,10 @@ namespace Landoria.PortalSelector
         // Saves the confirmed personal name in character memory.
         public void SetText(string text)
         {
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                return;
+            }
             PlayerPortalNames.Set(_id, text);
         }
     }

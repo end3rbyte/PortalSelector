@@ -4,12 +4,14 @@ using System.Linq;
 
 namespace Landoria.PortalSelector
 {
-    // Stores personal labels under a position-based portal identity.
+    // Stores personal labels under each portal's GUID.
     internal static class PlayerPortalNames
     {
         internal const int MaxLength = 50;
-        private const string Prefix = "Landoria.PortalSelector.NameStable.";
-        private const string AutoPrefix = "Landoria.PortalSelector.AutoName.";
+        internal const string DuplicateNameMessage =
+            "This name is already used by another portal.";
+        private const string Prefix = "Landoria.PortalSelector.NameGuidV1.";
+        private const string AutoPrefix = "Landoria.PortalSelector.AutoNameGuidV1.";
 
         // Reads the label for the current portal object.
         internal static string Get(ZDOID id)
@@ -20,12 +22,26 @@ namespace Landoria.PortalSelector
             {
                 return "";
             }
-            if (player.m_customData.TryGetValue(Key(record), out string value))
-            {
-                return value;
-            }
-            return player.m_customData.TryGetValue(LegacyKey(record), out value) ?
+            return player.m_customData.TryGetValue(Key(record), out string value) ?
                 value : "";
+        }
+
+        // Accepts a personal name or a name copied from a shared portal tag.
+        internal static bool IsNamed(ZDOID id)
+        {
+            return !string.IsNullOrWhiteSpace(Get(id));
+        }
+
+        // Finds an active portal by its personal name for name checks.
+        internal static PortalRecord FindByName(string name)
+        {
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                return null;
+            }
+            return PortalDirectory.KnownRecords().FirstOrDefault(record =>
+                record.Active && string.Equals(Get(record.Id), name,
+                    StringComparison.OrdinalIgnoreCase));
         }
 
         // Changes the personal label in memory for Valheim's next save.
@@ -35,22 +51,65 @@ namespace Landoria.PortalSelector
             PortalRecord record = PortalDirectory.Find(id);
             if (player != null && record != null && ZNet.instance != null)
             {
+                string currentKey = Key(record);
+                string currentAutoKey = AutoKey(record);
                 string personalName = name?.Trim() ?? "";
                 if (personalName.Length > MaxLength)
                 {
                     personalName = personalName.Substring(0, MaxLength);
                 }
-                if (InUse(player, record, personalName))
+                if (InUse(record, personalName))
                 {
                     Player.m_localPlayer.Message(MessageHud.MessageType.Center,
-                        "Ce nom est déjà utilisé par un autre portail.");
+                        DuplicateNameMessage);
                     return false;
+                }
+                PortalRecord inactive = FindInactiveNameOwner(id, personalName);
+                if (inactive != null &&
+                    PortalDirectory.RebindInactive(inactive.Id, id))
+                {
+                    player.m_customData.Remove(currentKey);
+                    player.m_customData.Remove(currentAutoKey);
                 }
                 player.m_customData[Key(record)] = personalName;
                 player.m_customData.Remove(AutoKey(record));
+                Plugin.DebugLog("Name: saved guid=" + record.Guid + ".");
                 return true;
             }
             return false;
+        }
+
+        // Reports whether another portal already uses this personal name.
+        internal static bool NameExists(ZDOID id, string name)
+        {
+            Player player = Player.m_localPlayer;
+            PortalRecord record = PortalDirectory.Find(id);
+            return player != null && record != null && ZNet.instance != null &&
+                InUse(record, name?.Trim() ?? "");
+        }
+
+        // Finds the saved portal that currently owns a proposed name.
+        internal static PortalRecord FindNameOwner(ZDOID id, string name)
+        {
+            foreach (PortalRecord candidate in PortalDirectory.KnownRecords())
+            {
+                if (candidate.Active && candidate.Id != id &&
+                    string.Equals(Get(candidate.Id),
+                    name?.Trim(), StringComparison.OrdinalIgnoreCase))
+                {
+                    return candidate;
+                }
+            }
+            return null;
+        }
+
+        // Finds a retired entry that the player is rebuilding under its old name.
+        private static PortalRecord FindInactiveNameOwner(ZDOID id, string name)
+        {
+            return PortalDirectory.KnownRecords().FirstOrDefault(candidate =>
+                !candidate.Active && candidate.Id != id &&
+                string.Equals(Get(candidate.Id), name,
+                    StringComparison.OrdinalIgnoreCase));
         }
 
         // Copies a shared label only when this portal has no personal name.
@@ -134,7 +193,8 @@ namespace Landoria.PortalSelector
             {
                 return;
             }
-            var ordered = records.Where(r => !string.IsNullOrWhiteSpace(Get(r.Id)))
+            var ordered = records.Where(r => r.Active &&
+                    !string.IsNullOrWhiteSpace(Get(r.Id)))
                 .OrderBy(r => player.m_customData.ContainsKey(AutoKey(r)) ? 1 : 0)
                 .ThenBy(r => PortalIdentity.Key(r), StringComparer.Ordinal);
             var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -156,33 +216,31 @@ namespace Landoria.PortalSelector
         }
 
         // Checks whether another portal already owns this personal name.
-        private static bool InUse(Player player, PortalRecord record, string name)
+        private static bool InUse(PortalRecord record, string name)
         {
             if (string.IsNullOrWhiteSpace(name))
             {
                 return false;
             }
-            string prefix = Prefix + ZNet.instance.GetWorldUID() + ".";
-            string ownKey = Key(record);
-            string ownLegacy = LegacyKey(record);
-            return player.m_customData.Any(entry =>
-                entry.Key.StartsWith(prefix, StringComparison.Ordinal) &&
-                entry.Key != ownKey && entry.Key != ownLegacy &&
-                string.Equals(entry.Value, name, StringComparison.OrdinalIgnoreCase));
+            string ownIdentity = PortalIdentity.Key(record);
+            return PortalDirectory.KnownRecords().Any(other =>
+                other.Active && PortalIdentity.Key(other) != ownIdentity &&
+                string.Equals(Get(other.Id), name,
+                    StringComparison.OrdinalIgnoreCase));
         }
 
         // Adds a suffix when a generated name is already in use.
         private static string UniqueName(Player player, PortalRecord record,
             string proposed)
         {
-            if (!InUse(player, record, proposed))
+            if (!InUse(record, proposed))
             {
                 return proposed;
             }
             string prefix = Prefix + ZNet.instance.GetWorldUID() + ".";
             var used = new HashSet<string>(player.m_customData.Where(entry =>
                 entry.Key.StartsWith(prefix, StringComparison.Ordinal) &&
-                entry.Key != Key(record) && entry.Key != LegacyKey(record))
+                entry.Key != Key(record))
                 .Select(entry => entry.Value), StringComparer.OrdinalIgnoreCase);
             return UniqueName(proposed, used);
         }
@@ -203,18 +261,14 @@ namespace Landoria.PortalSelector
             }
         }
 
-        // Checks both precise and earlier rounded saved labels.
+        // Checks the current personal label.
         private static bool HasPersonalName(Player player, PortalRecord record)
         {
-            if (player.m_customData.TryGetValue(Key(record), out string name))
-            {
-                return !string.IsNullOrWhiteSpace(name);
-            }
-            return player.m_customData.TryGetValue(LegacyKey(record), out name) &&
+            return player.m_customData.TryGetValue(Key(record), out string name) &&
                 !string.IsNullOrWhiteSpace(name);
         }
 
-        // Keeps the previously named endpoint plain, then uses stable position.
+        // Keeps the previously named endpoint plain, then uses portal GUIDs.
         private static bool IsFirst(PortalRecord record, PortalRecord partner)
         {
             Player player = Player.m_localPlayer;
@@ -237,20 +291,6 @@ namespace Landoria.PortalSelector
             return record.Id.ID < partner.Id.ID;
         }
 
-        // Clears a destroyed portal's personal label.
-        internal static void Forget(PortalRecord record)
-        {
-            if (Player.m_localPlayer != null && ZNet.instance != null)
-            {
-                Player.m_localPlayer.m_customData.Remove(Key(record));
-                Player.m_localPlayer.m_customData.Remove(AutoKey(record));
-                if (!PortalDirectory.HasOtherLegacyIdentity(record))
-                {
-                    Player.m_localPlayer.m_customData.Remove(LegacyKey(record));
-                }
-            }
-        }
-
         // Scopes the stable identity to the active world.
         private static string Key(PortalRecord record)
         {
@@ -265,11 +305,5 @@ namespace Landoria.PortalSelector
                 PortalIdentity.Key(record);
         }
 
-        // Finds a label saved under the earlier rounded position key.
-        private static string LegacyKey(PortalRecord record)
-        {
-            return Prefix + ZNet.instance.GetWorldUID() + "." +
-                PortalIdentity.LegacyKey(record);
-        }
     }
 }

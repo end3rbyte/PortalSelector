@@ -1,0 +1,26 @@
+using System.Linq;
+
+namespace Landoria.PortalSelector
+{
+    // Opens the destination picker from the saved portal catalog.
+    internal static partial class PortalDirectory
+    {
+        // Includes remembered portals without checking them in the background.
+        internal static void Request(ZDOID origin)
+        {
+            _nextScan = 0f;
+            Update();
+            if (Find(origin)?.Active != true ||
+                !PlayerPortalNames.IsNamed(origin))
+            {
+                Player.m_localPlayer?.Message(MessageHud.MessageType.Center,
+                    "Name this portal before choosing a destination.");
+                return;
+            }
+            PortalDialog.Open(origin, UniqueRecords(origin,
+                Records.Values.Where(record => record.Active &&
+                    PlayerPortalNames.IsNamed(record.Id))
+                    .ToList()));
+        }
+    }
+}

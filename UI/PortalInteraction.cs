@@ -12,11 +12,6 @@ namespace Landoria.PortalSelector
         [HarmonyPostfix]
         private static void HoverText(TeleportWorld __instance, ref string __result)
         {
-            if (PortalDirectory.IsPaused)
-            {
-                __result = "Portal data cleared. Rejoin to rediscover portals.";
-                return;
-            }
             ZDO zdo = __instance.GetComponent<ZNetView>()?.GetZDO();
             if (zdo == null)
             {
@@ -25,10 +20,8 @@ namespace Landoria.PortalSelector
             string personal = PlayerPortalNames.Get(zdo.m_uid).RemoveRichTextTags();
             if (string.IsNullOrWhiteSpace(personal))
             {
-                personal = "Portail";
+                personal = "Portal";
             }
-            string shared = PortalDisplay.SharedTag(
-                zdo.GetString(ZDOVars.s_tag));
             ZDOID selected = Selected(__instance);
             string title = personal;
             if (selected != ZDOID.None)
@@ -36,37 +29,36 @@ namespace Landoria.PortalSelector
                 PortalRecord destination = PortalDirectory.Find(selected);
                 string destinationName = destination == null ? "?" :
                     PortalDisplay.PersonalName(selected);
-                title += " -> " + destinationName;
+                title += "  <voffset=-3px>→</voffset>  <color=#FFA500>" +
+                    destinationName + "</color>";
             }
-            string status = selected != ZDOID.None &&
-                PortalConnection.GetState(selected) ==
-                PortalConnection.State.Connected ? "CONNECTÉ" : "NON CONNECTÉ";
-            __result = title + " [" + status + "]\n" +
+            string statusKey = selected != ZDOID.None ? "$piece_portal_connected" :
+                "$piece_portal_unconnected";
+            string status = Localization.instance.Localize(statusKey);
+            __result = title + "\n[" + status + "]\n" +
                 "[<color=yellow><b>" +
                 Localization.instance.Localize("$KEY_Use") +
-                "</b></color>] Renommer le portail" +
-                "\n[<color=yellow><b>Shift+E</b></color>] Changer la destination" +
-                "\nRepère: " + shared;
+                "</b></color>] Rename portal" +
+                "\n[<color=yellow><b>Shift+E</b></color>] Change destination";
         }
 
-        // Shows a personal portal as linked only after its destination is confirmed.
+        // Mirrors vanilla HaveTarget: a stored partner ID is enough to connect.
         [HarmonyPatch(typeof(TeleportWorld), "HaveTarget")]
         [HarmonyPostfix]
         private static void HaveTarget(TeleportWorld __instance, ref bool __result)
         {
             ZDOID selected = Selected(__instance);
-            __result = selected != ZDOID.None &&
-                PortalConnection.GetState(selected) == PortalConnection.State.Connected;
+            __result = selected != ZDOID.None;
         }
 
-        // Enables the local portal effect when its chosen destination is live.
+        // Mirrors vanilla: request a missing target and wait for its ZDO.
         [HarmonyPatch(typeof(TeleportWorld), "TargetFound")]
-        [HarmonyPostfix]
-        private static void TargetFound(TeleportWorld __instance, ref bool __result)
+        [HarmonyPrefix]
+        private static bool TargetFound(TeleportWorld __instance, ref bool __result)
         {
             ZDOID selected = Selected(__instance);
-            __result = selected != ZDOID.None &&
-                PortalConnection.GetState(selected) == PortalConnection.State.Connected;
+            __result = PortalConnection.TargetFound(selected);
+            return false;
         }
 
         // Opens the selector instead of the tag editor when Shift is held.
@@ -78,13 +70,6 @@ namespace Landoria.PortalSelector
             if (hold || human != Player.m_localPlayer)
             {
                 return true;
-            }
-            if (PortalDirectory.IsPaused)
-            {
-                human.Message(MessageHud.MessageType.Center,
-                    "Portal data cleared. Rejoin to rediscover portals.");
-                __result = false;
-                return false;
             }
             __result = true;
             if (!PrivateArea.CheckAccess(__instance.transform.position))
@@ -101,11 +86,8 @@ namespace Landoria.PortalSelector
                 }
                 else
                 {
-                    string shared = PortalDisplay.SharedTag(
-                        zdo.GetString(ZDOVars.s_tag));
                     TextInput.instance.RequestText(new PortalNameReceiver(zdo.m_uid),
-                        "Nom personnel | Repère partagé : " + shared,
-                        PlayerPortalNames.MaxLength);
+                        "Portal name", PlayerPortalNames.MaxLength);
                 }
             }
             return false;
@@ -120,30 +102,29 @@ namespace Landoria.PortalSelector
             {
                 return true;
             }
-            if (PortalDirectory.IsPaused)
-            {
-                player.Message(MessageHud.MessageType.Center,
-                    "Portal data cleared. Rejoin to rediscover portals.");
-                return false;
-            }
             ZDOID selected = Selected(__instance);
             if (selected == ZDOID.None)
             {
+                Plugin.DebugLog("Teleport: no active personal destination.");
                 player.Message(MessageHud.MessageType.Center,
                     "Choose a personal destination with Shift+E.");
                 return false;
             }
-            ZDO target = PortalConnection.GetTarget(selected);
-            PortalRecord details = PortalDirectory.Find(selected);
-            if (target == null || details == null)
-            {
-                PortalConnection.Request(selected);
-                player.Message(MessageHud.MessageType.Center,
-                    "Selected portal is not connected yet.");
-                return false;
-            }
             if (!CanTeleport(player, __instance))
             {
+                return false;
+            }
+            PortalRecord details = PortalDirectory.Find(selected);
+            if (details == null)
+            {
+                Plugin.DebugLog("Teleport: selected zdo=" + selected +
+                    " missing from catalog.");
+                return false;
+            }
+            ZDO target = PortalConnection.GetConfirmedTarget(selected);
+            if (target == null)
+            {
+                PortalConnection.Request(selected);
                 return false;
             }
             Travel(player, target, details);
@@ -151,20 +132,22 @@ namespace Landoria.PortalSelector
         }
 
         // Sends the player to the confirmed destination portal.
-        private static void Travel(Player player, ZDO target,
-            PortalRecord details)
+        private static void Travel(Player player, ZDO target, PortalRecord details)
         {
             Quaternion rotation = target.GetRotation();
             Vector3 exit = target.GetPosition() + rotation * Vector3.forward *
                 details.ExitDistance + Vector3.up;
-            if (player.TeleportTo(exit, rotation, true))
+            bool accepted = player.TeleportTo(exit, rotation, true);
+            Plugin.DebugLog("Teleport: guid=" + details.Guid +
+                " zdo=" + target.m_uid + " accepted=" + accepted + ".");
+            if (accepted)
             {
                 Game.instance.IncrementPlayerStat(PlayerStatType.PortalsUsed);
             }
         }
 
         // Reads the local player's saved destination for this source portal.
-        private static ZDOID Selected(TeleportWorld portal)
+        internal static ZDOID Selected(TeleportWorld portal)
         {
             if (Player.m_localPlayer == null)
             {

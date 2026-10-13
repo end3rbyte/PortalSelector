@@ -7,7 +7,7 @@ namespace Landoria.PortalSelector
     [HarmonyPatch(typeof(ZNetScene), "Awake")]
     internal static class PortalCost
     {
-        internal const int CostMultiplier = 2;
+        internal const float CostMultiplier = 1.5f;
         // Updates the prefab when the game registers its pieces.
         [HarmonyPostfix]
         private static void OnSceneReady()
@@ -32,7 +32,7 @@ namespace Landoria.PortalSelector
                     name == "GreydwarfEye" ? 10 : name == "SurtlingCore" ? 2 : 0;
                 if (amount > 0)
                 {
-                    resource.m_amount = amount * CostMultiplier;
+                    resource.m_amount = Mathf.RoundToInt(amount * CostMultiplier);
                 }
             }
         }

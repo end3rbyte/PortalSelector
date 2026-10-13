@@ -1,105 +1,75 @@
-using System;
 using System.Collections.Generic;
 
 namespace Landoria.PortalSelector
 {
-    // Stores personal routes with stable source and destination identities.
+    // Stores each personal route by the GUIDs of its two portals.
     internal static class PlayerDestinations
     {
-        private const string Prefix = "Landoria.PortalSelector.DestinationStable.";
+        private const string Prefix =
+            "Landoria.PortalSelector.DestinationByGuidV1.";
+        private static readonly Dictionary<string, string> LastResolution =
+            new Dictionary<string, string>();
 
-        // Resolves a saved destination to its current Valheim object ID.
+        internal static void Reset()
+        {
+            LastResolution.Clear();
+        }
+
+        // Resolves a saved destination GUID to its current world object ID.
         internal static ZDOID Get(ZDOID origin)
         {
             Player player = Player.m_localPlayer;
             PortalRecord source = PortalDirectory.Find(origin);
-            if (player == null || source == null || ZNet.instance == null)
+            if (player == null || source == null || !source.Active ||
+                ZNet.instance == null || !PlayerPortalNames.IsNamed(origin))
             {
                 return ZDOID.None;
             }
-            if (!player.m_customData.TryGetValue(Key(source), out string identity) &&
-                !player.m_customData.TryGetValue(LegacyKey(source), out identity))
+            if (!player.m_customData.TryGetValue(Key(source.Guid),
+                    out string targetGuid))
             {
+                Trace(source.Guid, "no selection");
                 return ZDOID.None;
             }
-            return PortalDirectory.FindByIdentity(identity)?.Id ?? ZDOID.None;
+            PortalRecord target = PortalDirectory.FindByGuid(targetGuid);
+            Trace(source.Guid, target != null && target.Active ?
+                "active target=" + targetGuid + " zdo=" + target.Id :
+                "unavailable target=" + targetGuid);
+            return target != null && target.Active ? target.Id : ZDOID.None;
         }
 
-        // Changes a route in memory for Valheim's next normal character save.
+        // Saves an explicit choice using both portals' GUIDs.
         internal static void Set(ZDOID origin, ZDOID destination)
         {
             Player player = Player.m_localPlayer;
             PortalRecord source = PortalDirectory.Find(origin);
             PortalRecord target = PortalDirectory.Find(destination);
-            if (player != null && source != null && target != null &&
-                ZNet.instance != null)
+            if (player != null && ZNet.instance != null && source != null &&
+                target != null && source.Active && target.Active &&
+                PlayerPortalNames.IsNamed(origin) &&
+                PlayerPortalNames.IsNamed(destination))
             {
-                player.m_customData[Key(source)] = PortalIdentity.Key(target);
+                player.m_customData[Key(source.Guid)] = target.Guid;
+                Plugin.DebugLog("Route: selected source=" + source.Guid +
+                    " target=" + target.Guid + " targetZdo=" + target.Id + ".");
             }
         }
 
-        // Copies an existing vanilla link only for a new personal source.
-        internal static void InitializeFromShared(ZDO portal)
+        private static string Key(string guid)
         {
-            Player player = Player.m_localPlayer;
-            PortalRecord source = PortalDirectory.Find(portal.m_uid);
-            if (player == null || source == null || ZNet.instance == null ||
-                (player.m_customData.ContainsKey(Key(source)) ||
-                 player.m_customData.ContainsKey(LegacyKey(source))))
+            return Prefix + ZNet.instance.GetWorldUID() + "." + guid;
+        }
+
+        // Reports a route only when its resolution changes.
+        private static void Trace(string sourceGuid, string state)
+        {
+            if (LastResolution.TryGetValue(sourceGuid, out string previous) &&
+                previous == state)
             {
                 return;
             }
-            ZDOID targetId = portal.GetConnectionZDOID(
-                ZDOExtraData.ConnectionType.Portal);
-            PortalRecord target = PortalDirectory.Find(targetId);
-            if (target != null)
-            {
-                player.m_customData[Key(source)] = PortalIdentity.Key(target);
-            }
-        }
-
-        // Clears routes involving a confirmed destroyed portal.
-        internal static void Forget(PortalRecord portal)
-        {
-            Player player = Player.m_localPlayer;
-            if (player == null || ZNet.instance == null)
-            {
-                return;
-            }
-            string identity = PortalIdentity.Key(portal);
-            string legacyIdentity = PortalIdentity.LegacyKey(portal);
-            bool clearLegacy = !PortalDirectory.HasOtherLegacyIdentity(portal);
-            string prefix = Prefix + ZNet.instance.GetWorldUID() + ".";
-            List<string> affected = new List<string>();
-            foreach (KeyValuePair<string, string> choice in player.m_customData)
-            {
-                if (choice.Key.StartsWith(prefix, StringComparison.Ordinal) &&
-                    (choice.Key == Key(portal) ||
-                     choice.Value == identity ||
-                     clearLegacy && (choice.Key == LegacyKey(portal) ||
-                                     choice.Value == legacyIdentity)))
-                {
-                    affected.Add(choice.Key);
-                }
-            }
-            foreach (string key in affected)
-            {
-                player.m_customData[key] = "";
-            }
-        }
-
-        // Namespaces the physical portal identity to the active world.
-        private static string Key(PortalRecord record)
-        {
-            return Prefix + ZNet.instance.GetWorldUID() + "." +
-                PortalIdentity.Key(record);
-        }
-
-        // Finds a route saved under the earlier rounded position key.
-        private static string LegacyKey(PortalRecord record)
-        {
-            return Prefix + ZNet.instance.GetWorldUID() + "." +
-                PortalIdentity.LegacyKey(record);
+            LastResolution[sourceGuid] = state;
+            Plugin.DebugLog("Route: source=" + sourceGuid + " " + state + ".");
         }
     }
 }
