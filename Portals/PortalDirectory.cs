@@ -13,6 +13,7 @@ namespace Landoria.PortalSelector
         private static readonly HashSet<ZDOID> Confirmed = new HashSet<ZDOID>();
         private static readonly Queue<ZDOID> PendingValidation = new Queue<ZDOID>();
         private static Player _player;
+        private static Player _clearedPlayer;
         private static string _catalogKey;
         private static float _nextScan;
         private static float _nextValidationRequest;
@@ -34,6 +35,15 @@ namespace Landoria.PortalSelector
         // Scans portals currently known to the client every few seconds.
         internal static void Update()
         {
+            if (_clearedPlayer != null)
+            {
+                if (Player.m_localPlayer == null ||
+                    ReferenceEquals(Player.m_localPlayer, _clearedPlayer))
+                {
+                    return;
+                }
+                _clearedPlayer = null;
+            }
             if (Player.m_localPlayer == null || ZNet.instance == null ||
                 ZDOMan.instance == null)
             {
@@ -51,6 +61,23 @@ namespace Landoria.PortalSelector
             DispatchValidation();
             RefreshConfirmed();
         }
+
+        // Pauses rediscovery until this character leaves the current session.
+        internal static void PauseAfterClear(Player player)
+        {
+            LoadSession();
+            _clearedPlayer = player;
+            Records.Clear();
+            Confirmed.Clear();
+            PendingValidation.Clear();
+            _validating = false;
+            _beginRequested = false;
+            PortalConnection.Reset();
+        }
+
+        // Reports whether this character has cleared portal data this session.
+        internal static bool IsPaused => _clearedPlayer != null &&
+            ReferenceEquals(Player.m_localPlayer, _clearedPlayer);
 
         // Records portals received in the client's current world state.
         private static void Scan()
@@ -134,6 +161,26 @@ namespace Landoria.PortalSelector
                 ZDOExtraData.ConnectionType.Portal);
             PortalRecord partner = targetId == ZDOID.None ? null : Find(targetId);
             PlayerPortalNames.InitializeFromShared(record, partner);
+        }
+
+        // Measures the nearest portal other than this pair's other endpoint.
+        internal static float NearestOtherPortalDistanceSquared(PortalRecord record,
+            PortalRecord partner)
+        {
+            float nearest = float.PositiveInfinity;
+            foreach (PortalRecord other in Records.Values)
+            {
+                if (PortalIdentity.Key(other) == PortalIdentity.Key(record) ||
+                    partner != null &&
+                    PortalIdentity.Key(other) == PortalIdentity.Key(partner))
+                {
+                    continue;
+                }
+                float dx = record.Position.x - other.Position.x;
+                float dz = record.Position.z - other.Position.z;
+                nearest = Math.Min(nearest, dx * dx + dz * dz);
+            }
+            return nearest;
         }
 
         // Collapses records with the same exact portal identity.

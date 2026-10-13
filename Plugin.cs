@@ -18,6 +18,7 @@ namespace Landoria.PortalSelector
             Logger.LogInfo($"{PluginName} {PluginVersion} loaded.");
             _harmony = new Harmony(PluginGuid);
             _harmony.PatchAll();
+            PortalDataCommand.Register();
             Game.m_playerInitialSpawn += PortalDirectory.BeginValidation;
         }
 

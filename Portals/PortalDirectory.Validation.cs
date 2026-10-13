@@ -21,6 +21,12 @@ namespace Landoria.PortalSelector
         // Opens immediately with destinations confirmed in this session.
         internal static void Request(ZDOID origin)
         {
+            if (IsPaused)
+            {
+                Player.m_localPlayer.Message(MessageHud.MessageType.Center,
+                    "Portal data cleared. Rejoin to rediscover portals.");
+                return;
+            }
             _nextScan = 0f;
             Update();
             List<PortalRecord> available = new List<PortalRecord>();

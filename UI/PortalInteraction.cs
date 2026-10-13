@@ -12,6 +12,11 @@ namespace Landoria.PortalSelector
         [HarmonyPostfix]
         private static void HoverText(TeleportWorld __instance, ref string __result)
         {
+            if (PortalDirectory.IsPaused)
+            {
+                __result = "Portal data cleared. Rejoin to rediscover portals.";
+                return;
+            }
             ZDO zdo = __instance.GetComponent<ZNetView>()?.GetZDO();
             if (zdo == null)
             {
@@ -74,6 +79,13 @@ namespace Landoria.PortalSelector
             {
                 return true;
             }
+            if (PortalDirectory.IsPaused)
+            {
+                human.Message(MessageHud.MessageType.Center,
+                    "Portal data cleared. Rejoin to rediscover portals.");
+                __result = false;
+                return false;
+            }
             __result = true;
             if (!PrivateArea.CheckAccess(__instance.transform.position))
             {
@@ -107,6 +119,12 @@ namespace Landoria.PortalSelector
             if (player != Player.m_localPlayer)
             {
                 return true;
+            }
+            if (PortalDirectory.IsPaused)
+            {
+                player.Message(MessageHud.MessageType.Center,
+                    "Portal data cleared. Rejoin to rediscover portals.");
+                return false;
             }
             ZDOID selected = Selected(__instance);
             if (selected == ZDOID.None)

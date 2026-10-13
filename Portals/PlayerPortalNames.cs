@@ -75,7 +75,7 @@ namespace Landoria.PortalSelector
             {
                 return;
             }
-            string name = UniqueName(player, record, InitialName(record, partner));
+            string name = InitialName(record, partner);
             player.m_customData[key] = name;
             player.m_customData[autoKey] = name;
         }
@@ -91,11 +91,7 @@ namespace Landoria.PortalSelector
                 player.m_customData.Remove(autoKey);
                 return;
             }
-            if (partner == null)
-            {
-                return;
-            }
-            string name = UniqueName(player, record, InitialName(record, partner));
+            string name = InitialName(record, partner);
             if (current == name)
             {
                 return;
@@ -104,11 +100,23 @@ namespace Landoria.PortalSelector
             player.m_customData[autoKey] = name;
         }
 
-        // Keeps the shared tag intact and adds the pair suffix when applicable.
+        // Marks one endpoint of a connected pair and leaves lone portals plain.
         private static string InitialName(PortalRecord record, PortalRecord partner)
         {
-            string suffix = partner == null ? "" : IsFirst(record, partner) ?
-                "_1" : "_2";
+            string suffix = "";
+            if (partner != null)
+            {
+                float distance = PortalDirectory.NearestOtherPortalDistanceSquared(
+                    record, partner);
+                float partnerDistance =
+                    PortalDirectory.NearestOtherPortalDistanceSquared(partner, record);
+                bool nearby = distance < 100f * 100f;
+                bool partnerNearby = partnerDistance < 100f * 100f;
+                bool second = nearby != partnerNearby ? nearby :
+                    nearby && distance != partnerDistance ?
+                        distance < partnerDistance : !IsFirst(record, partner);
+                suffix = second ? "_2" : "";
+            }
             string tag = record.Tag.Trim();
             int available = MaxLength - suffix.Length;
             if (tag.Length > available)
@@ -206,9 +214,16 @@ namespace Landoria.PortalSelector
                 !string.IsNullOrWhiteSpace(name);
         }
 
-        // Uses the stable position first and the live ID only for exact ties.
+        // Keeps the previously named endpoint plain, then uses stable position.
         private static bool IsFirst(PortalRecord record, PortalRecord partner)
         {
+            Player player = Player.m_localPlayer;
+            bool recordNamed = HasPersonalName(player, record);
+            bool partnerNamed = HasPersonalName(player, partner);
+            if (recordNamed != partnerNamed)
+            {
+                return recordNamed;
+            }
             int order = string.CompareOrdinal(PortalIdentity.Key(record),
                 PortalIdentity.Key(partner));
             if (order != 0)
