@@ -292,16 +292,5 @@ namespace Landoria.PortalSelector
                 text.fontSizeMax = 20f;
             }
         }
-
-        // Adds connection status only to the saved personal destination.
-        private static string StatusSuffix(ZDOID id)
-        {
-            if (id != _committed)
-            {
-                return "";
-            }
-            return " — " + Localization.instance.Localize(
-                "$piece_portal_connected");
-        }
     }
 }

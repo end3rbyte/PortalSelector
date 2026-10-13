@@ -38,12 +38,8 @@ namespace Landoria.PortalSelector
             bool changed = false;
             List<ZDO> portals = new List<ZDO>(ZDOMan.instance.GetPortalList());
             changed |= ScanObjects(portals);
-            foreach (ZDO portal in portals)
-            {
-                InitializeName(portal);
-            }
             changed |= RefreshBiomes();
-            PlayerPortalNames.EnsureUniqueNames(Records.Values);
+            PortalVanillaImport.Update(portals);
             if (changed)
             {
                 PlayerPortalCatalog.Save(_player, _catalogKey, Records);
@@ -95,20 +91,6 @@ namespace Landoria.PortalSelector
             return changed;
         }
 
-        // Copies a tag now and adds a pair suffix when its partner is known.
-        private static void InitializeName(ZDO portal)
-        {
-            PortalRecord record = Find(portal.m_uid);
-            if (record == null)
-            {
-                return;
-            }
-            ZDOID targetId = portal.GetConnectionZDOID(
-                ZDOExtraData.ConnectionType.Portal);
-            PortalRecord partner = targetId == ZDOID.None ? null : Find(targetId);
-            PlayerPortalNames.InitializeFromShared(record, partner);
-        }
-
         // Measures the nearest portal other than this pair's other endpoint.
         internal static float NearestOtherPortalDistanceSquared(PortalRecord record,
             PortalRecord partner)
@@ -127,46 +109,6 @@ namespace Landoria.PortalSelector
                 nearest = Math.Min(nearest, dx * dx + dz * dz);
             }
             return nearest;
-        }
-
-        // Collapses records with the same portal GUID.
-        private static List<PortalRecord> UniqueRecords(ZDOID origin,
-            List<PortalRecord> candidates)
-        {
-            List<PortalRecord> result = new List<PortalRecord>();
-            foreach (PortalRecord candidate in candidates)
-            {
-                int index = result.FindIndex(record => SamePortal(record, candidate));
-                if (index < 0)
-                {
-                    result.Add(candidate);
-                }
-                else if (candidate.Id == origin ||
-                         result[index].Id != origin && Prefer(candidate, result[index]))
-                {
-                    result[index] = candidate;
-                }
-            }
-            return result;
-        }
-
-        // Compares persistent portal identities.
-        private static bool SamePortal(PortalRecord first, PortalRecord second)
-        {
-            return PortalIdentity.Key(first) == PortalIdentity.Key(second);
-        }
-
-        // Prefers a live object, then the later object ID from one creator.
-        private static bool Prefer(PortalRecord candidate, PortalRecord current)
-        {
-            bool candidateLive = PortalConnection.GetTarget(candidate.Id) != null;
-            bool currentLive = PortalConnection.GetTarget(current.Id) != null;
-            if (candidateLive != currentLive)
-            {
-                return candidateLive;
-            }
-            return candidate.Id.UserID == current.Id.UserID &&
-                candidate.Id.ID > current.Id.ID;
         }
 
         // Finds a saved destination outside the loaded area.
@@ -239,6 +181,7 @@ namespace Landoria.PortalSelector
             if (!string.IsNullOrEmpty(guid))
             {
                 portal.Set(PortalGuidKey, guid);
+                ZDOMan.instance.SetDirtyPortals();
             }
             Records.Remove(PortalIdentity.CatalogKey(inactive));
             Records.Remove(PortalIdentity.CatalogKey(current));
@@ -290,6 +233,7 @@ namespace Landoria.PortalSelector
             {
                 guid = Guid.NewGuid().ToString("N");
                 portal.Set(PortalGuidKey, guid);
+                ZDOMan.instance.SetDirtyPortals();
                 Plugin.DebugLog("Portal: assigned guid=" + guid +
                     " zdo=" + portal.m_uid + ".");
             }
@@ -306,8 +250,6 @@ namespace Landoria.PortalSelector
                     Position = portal.GetPosition(),
                     Biome = ResolveBiome(portal.GetPosition())
                 },
-                Rotation = portal.GetRotation(),
-                AllowAllItems = component.m_allowAllItems,
                 ExitDistance = component.m_exitDistance
             };
             return StoreRecord(record);
@@ -331,7 +273,6 @@ namespace Landoria.PortalSelector
                 !old.Active ||
                 old.Tag != record.Tag ||
                 old.Metadata.Position != record.Metadata.Position ||
-                old.Rotation != record.Rotation ||
                 old.Metadata.Biome != record.Metadata.Biome;
             Records[key] = record;
             LogRecordChange(record, old, existed);

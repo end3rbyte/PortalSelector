@@ -15,6 +15,39 @@ namespace Landoria.PortalSelector
             LastResolution.Clear();
         }
 
+        // Finds both endpoints of routes between portals still in the catalog.
+        internal static HashSet<string> LinkedGuids(HashSet<string> knownGuids)
+        {
+            var linked = new HashSet<string>();
+            Player player = Player.m_localPlayer;
+            if (player == null || ZNet.instance == null)
+            {
+                return linked;
+            }
+            foreach (string source in knownGuids)
+            {
+                if (player.m_customData.TryGetValue(Key(source),
+                        out string target) && source != target &&
+                    knownGuids.Contains(target))
+                {
+                    linked.Add(source);
+                    linked.Add(target);
+                }
+            }
+            return linked;
+        }
+
+        // Removes the saved route of a portal deleted from the catalog.
+        internal static void Forget(string guid)
+        {
+            if (Player.m_localPlayer == null || ZNet.instance == null)
+            {
+                return;
+            }
+            Player.m_localPlayer.m_customData.Remove(Key(guid));
+            LastResolution.Remove(guid);
+        }
+
         // Resolves a saved destination GUID to its current world object ID.
         internal static ZDOID Get(ZDOID origin)
         {
@@ -32,10 +65,11 @@ namespace Landoria.PortalSelector
                 return ZDOID.None;
             }
             PortalRecord target = PortalDirectory.FindByGuid(targetGuid);
-            Trace(source.Guid, target != null && target.Active ?
-                "active target=" + targetGuid + " zdo=" + target.Id :
-                "unavailable target=" + targetGuid);
-            return target != null && target.Active ? target.Id : ZDOID.None;
+            Trace(source.Guid, target != null ?
+                (target.Active ? "active" : "inactive") + " target=" +
+                    targetGuid + " zdo=" + target.Id :
+                "unknown target=" + targetGuid);
+            return target != null ? target.Id : ZDOID.None;
         }
 
         // Saves an explicit choice using both portals' GUIDs.
@@ -53,6 +87,29 @@ namespace Landoria.PortalSelector
                 Plugin.DebugLog("Route: selected source=" + source.Guid +
                     " target=" + target.Guid + " targetZdo=" + target.Id + ".");
             }
+        }
+
+        // Imports a vanilla partner only when no personal route was saved.
+        internal static bool ImportIfAbsent(PortalRecord source, PortalRecord target)
+        {
+            Player player = Player.m_localPlayer;
+            if (player == null || ZNet.instance == null || source == null ||
+                target == null || !source.Active || !target.Active ||
+                source.Guid == target.Guid ||
+                !PlayerPortalNames.IsNamed(source.Id) ||
+                !PlayerPortalNames.IsNamed(target.Id))
+            {
+                return false;
+            }
+            string key = Key(source.Guid);
+            if (player.m_customData.ContainsKey(key))
+            {
+                return false;
+            }
+            player.m_customData[key] = target.Guid;
+            Plugin.DebugLog("Route: imported vanilla source=" + source.Guid +
+                " target=" + target.Guid + " targetZdo=" + target.Id + ".");
+            return true;
         }
 
         private static string Key(string guid)

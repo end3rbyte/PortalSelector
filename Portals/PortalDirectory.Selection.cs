@@ -17,10 +17,8 @@ namespace Landoria.PortalSelector
                     "Name this portal before choosing a destination.");
                 return;
             }
-            PortalDialog.Open(origin, UniqueRecords(origin,
-                Records.Values.Where(record => record.Active &&
-                    PlayerPortalNames.IsNamed(record.Id))
-                    .ToList()));
+            PortalDialog.Open(origin, Records.Values.Where(record =>
+                record.Active && PlayerPortalNames.IsNamed(record.Id)).ToList());
         }
     }
 }

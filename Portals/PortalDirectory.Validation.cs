@@ -13,6 +13,7 @@ namespace Landoria.PortalSelector
         private static ZNet _validationSession;
         private static bool _validationRequested;
         private static bool _validationStarted;
+        private static bool _startupCleanupDone;
         private static float _nextValidationRequest;
 
         // The game raises this event for the first player spawn.
@@ -37,6 +38,7 @@ namespace Landoria.PortalSelector
             _validationSession = null;
             _validationRequested = false;
             _validationStarted = false;
+            _startupCleanupDone = false;
             _nextValidationRequest = 0f;
         }
 
@@ -54,6 +56,11 @@ namespace Landoria.PortalSelector
             }
             DispatchValidation();
             CheckValidation();
+            if (_validationStarted && !_startupCleanupDone &&
+                ValidationQueue.Count == 0 && ValidationPending.Count == 0)
+            {
+                _startupCleanupDone = CleanupInactiveUnlinked();
+            }
         }
 
         // Snapshots GUIDs so an ID change cannot validate another portal.
@@ -87,6 +94,7 @@ namespace Landoria.PortalSelector
             }
             if (PortalConnection.GetConfirmedTarget(record.Id) != null)
             {
+                ReactivateValidated(record);
                 Plugin.DebugLog("Validation: already available guid=" + guid +
                     " zdo=" + record.Id + ".");
                 return;
@@ -111,6 +119,7 @@ namespace Landoria.PortalSelector
                 if (PortalConnection.GetConfirmedTarget(record.Id) != null)
                 {
                     ValidationPending.Remove(guid);
+                    ReactivateValidated(record);
                     Plugin.DebugLog("Validation: confirmed guid=" + guid +
                         " zdo=" + record.Id + ".");
                     continue;
@@ -125,6 +134,19 @@ namespace Landoria.PortalSelector
                     " zdo=" + record.Id + ".");
                 MarkInactive(record.Id);
             }
+        }
+
+        // A confirmed portal must be active before startup cleanup examines it.
+        private static void ReactivateValidated(PortalRecord record)
+        {
+            if (record.Active)
+            {
+                return;
+            }
+            record.Active = true;
+            PlayerPortalCatalog.Save(_player, _catalogKey, Records);
+            Plugin.DebugLog("Catalog: reactivated guid=" + record.Guid +
+                " zdo=" + record.Id + " after validation.");
         }
     }
 }

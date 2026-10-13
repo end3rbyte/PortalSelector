@@ -112,51 +112,31 @@ namespace Landoria.PortalSelector
                     StringComparison.OrdinalIgnoreCase));
         }
 
-        // Copies a shared label only when this portal has no personal name.
-        internal static void InitializeFromShared(PortalRecord record,
+        // Imports a shared tag only once and preserves an existing personal name.
+        internal static void ImportFromShared(PortalRecord record,
             PortalRecord partner)
         {
             Player player = Player.m_localPlayer;
-            if (player == null || ZNet.instance == null ||
+            if (player == null || ZNet.instance == null)
+            {
+                return;
+            }
+            player.m_customData.Remove(AutoKey(record));
+            if (HasPersonalName(player, record) ||
                 string.IsNullOrWhiteSpace(record.Tag))
             {
                 return;
             }
-            string key = Key(record);
-            string autoKey = AutoKey(record);
-            if (player.m_customData.TryGetValue(autoKey, out string automatic))
-            {
-                CompleteAutomaticName(player, key, autoKey, automatic,
-                    record, partner);
-                return;
-            }
-            if (HasPersonalName(player, record))
-            {
-                return;
-            }
             string name = InitialName(record, partner);
-            player.m_customData[key] = name;
-            player.m_customData[autoKey] = name;
-        }
-
-        // Adds a suffix later only if the player kept the generated name.
-        private static void CompleteAutomaticName(Player player, string key,
-            string autoKey, string automatic, PortalRecord record,
-            PortalRecord partner)
-        {
-            if (!player.m_customData.TryGetValue(key, out string current) ||
-                current != automatic)
+            if (InUse(record, name))
             {
-                player.m_customData.Remove(autoKey);
-                return;
+                var used = new HashSet<string>(PortalDirectory.KnownRecords()
+                    .Where(other => other.Active && other.Guid != record.Guid)
+                    .Select(other => Get(other.Id)),
+                    StringComparer.OrdinalIgnoreCase);
+                name = UniqueName(name, used);
             }
-            string name = InitialName(record, partner);
-            if (current == name)
-            {
-                return;
-            }
-            player.m_customData[key] = name;
-            player.m_customData[autoKey] = name;
+            player.m_customData[Key(record)] = name;
         }
 
         // Marks one endpoint of a connected pair and leaves lone portals plain.
@@ -185,36 +165,6 @@ namespace Landoria.PortalSelector
             return tag + suffix;
         }
 
-        // Repairs older duplicate labels without changing unique labels.
-        internal static void EnsureUniqueNames(IEnumerable<PortalRecord> records)
-        {
-            Player player = Player.m_localPlayer;
-            if (player == null || ZNet.instance == null)
-            {
-                return;
-            }
-            var ordered = records.Where(r => r.Active &&
-                    !string.IsNullOrWhiteSpace(Get(r.Id)))
-                .OrderBy(r => player.m_customData.ContainsKey(AutoKey(r)) ? 1 : 0)
-                .ThenBy(r => PortalIdentity.Key(r), StringComparer.Ordinal);
-            var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (PortalRecord record in ordered)
-            {
-                string current = Get(record.Id);
-                if (used.Add(current))
-                {
-                    continue;
-                }
-                string replacement = UniqueName(current, used);
-                player.m_customData[Key(record)] = replacement;
-                if (player.m_customData.ContainsKey(AutoKey(record)))
-                {
-                    player.m_customData[AutoKey(record)] = replacement;
-                }
-                used.Add(replacement);
-            }
-        }
-
         // Checks whether another portal already owns this personal name.
         private static bool InUse(PortalRecord record, string name)
         {
@@ -227,22 +177,6 @@ namespace Landoria.PortalSelector
                 other.Active && PortalIdentity.Key(other) != ownIdentity &&
                 string.Equals(Get(other.Id), name,
                     StringComparison.OrdinalIgnoreCase));
-        }
-
-        // Adds a suffix when a generated name is already in use.
-        private static string UniqueName(Player player, PortalRecord record,
-            string proposed)
-        {
-            if (!InUse(record, proposed))
-            {
-                return proposed;
-            }
-            string prefix = Prefix + ZNet.instance.GetWorldUID() + ".";
-            var used = new HashSet<string>(player.m_customData.Where(entry =>
-                entry.Key.StartsWith(prefix, StringComparison.Ordinal) &&
-                entry.Key != Key(record))
-                .Select(entry => entry.Value), StringComparer.OrdinalIgnoreCase);
-            return UniqueName(proposed, used);
         }
 
         // Finds the first free numbered form of a name.
@@ -268,16 +202,21 @@ namespace Landoria.PortalSelector
                 !string.IsNullOrWhiteSpace(name);
         }
 
-        // Keeps the previously named endpoint plain, then uses portal GUIDs.
-        private static bool IsFirst(PortalRecord record, PortalRecord partner)
+        // Deletes the personal name and legacy automatic-name marker.
+        internal static void Forget(PortalRecord record)
         {
             Player player = Player.m_localPlayer;
-            bool recordNamed = HasPersonalName(player, record);
-            bool partnerNamed = HasPersonalName(player, partner);
-            if (recordNamed != partnerNamed)
+            if (player == null || ZNet.instance == null)
             {
-                return recordNamed;
+                return;
             }
+            player.m_customData.Remove(Key(record));
+            player.m_customData.Remove(AutoKey(record));
+        }
+
+        // Uses stable GUIDs to break equal-distance ties for a vanilla pair.
+        private static bool IsFirst(PortalRecord record, PortalRecord partner)
+        {
             int order = string.CompareOrdinal(PortalIdentity.Key(record),
                 PortalIdentity.Key(partner));
             if (order != 0)

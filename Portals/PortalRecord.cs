@@ -1,8 +1,6 @@
-using UnityEngine;
-
 namespace Landoria.PortalSelector
 {
-    // Holds one portal returned by the world host.
+    // Holds a portal remembered by the player's catalog.
     internal sealed class PortalRecord
     {
         internal ZDOID Id;
@@ -10,8 +8,6 @@ namespace Landoria.PortalSelector
         internal bool Active = true;
         internal string Tag;
         internal PortalMetadata Metadata = new PortalMetadata();
-        internal Quaternion Rotation;
-        internal bool AllowAllItems;
         internal float ExitDistance;
     }
 }

@@ -7,7 +7,8 @@ namespace Landoria.PortalSelector
     // Stores the known portal catalog inside the character's custom data.
     internal static class PlayerPortalCatalog
     {
-        private const int ActiveFormat = -2;
+        private const int ActiveFormat = -3;
+        private const int PreviousGuidFormat = -2;
 
         // Reads only this world's catalog from the current character.
         internal static bool Load(Player player, string key,
@@ -32,31 +33,32 @@ namespace Landoria.PortalSelector
             }
         }
 
-        // Decodes only the current catalog format and skips GUID-less records.
+        // Reads GUID catalogs and rewrites the previous layout without unused fields.
         private static bool ReadPackage(string value,
             Dictionary<string, PortalRecord> records)
         {
             ZPackage package = new ZPackage(Convert.FromBase64String(value));
-            if (package.ReadInt() != ActiveFormat)
+            int format = package.ReadInt();
+            if (format != ActiveFormat && format != PreviousGuidFormat)
             {
                 Plugin.WarningLog("Catalog: unsupported format; ignoring saved data.");
                 return false;
             }
             int count = Mathf.Clamp(package.ReadInt(), 0, 10000);
-            bool removed = false;
+            bool rewrite = format != ActiveFormat;
             for (int i = 0; i < count; i++)
             {
-                PortalRecord record = ReadRecord(package);
+                PortalRecord record = ReadRecord(package, format);
                 if (string.IsNullOrWhiteSpace(record.Guid))
                 {
-                    removed = true;
+                    rewrite = true;
                     continue;
                 }
                 records[PortalIdentity.CatalogKey(record)] = record;
             }
             Plugin.DebugLog("Catalog: loaded " + records.Count +
-                " portals; missing GUID entries discarded=" + removed + ".");
-            return removed;
+                " portals; rewrite=" + rewrite + ".");
+            return rewrite;
         }
 
         // Updates memory; Valheim writes it on its next normal character save.
@@ -81,16 +83,22 @@ namespace Landoria.PortalSelector
             }
         }
 
-        // Decodes one saved portal.
-        private static PortalRecord ReadRecord(ZPackage package)
+        // Skips obsolete fields when reading the previous GUID catalog layout.
+        private static PortalRecord ReadRecord(ZPackage package, int format)
         {
             PortalRecord record = new PortalRecord();
             record.Id = package.ReadZDOID();
             record.Tag = package.ReadString();
             record.Metadata.Position = package.ReadVector3();
-            record.Rotation = package.ReadQuaternion();
+            if (format == PreviousGuidFormat)
+            {
+                package.ReadQuaternion();
+            }
             record.Metadata.Biome = (Heightmap.Biome)package.ReadInt();
-            record.AllowAllItems = package.ReadBool();
+            if (format == PreviousGuidFormat)
+            {
+                package.ReadBool();
+            }
             record.ExitDistance = package.ReadSingle();
             record.Guid = package.ReadString();
             record.Active = package.ReadBool();
@@ -103,9 +111,7 @@ namespace Landoria.PortalSelector
             package.Write(record.Id);
             package.Write(record.Tag ?? "");
             package.Write(record.Metadata.Position);
-            package.Write(record.Rotation);
             package.Write((int)record.Metadata.Biome);
-            package.Write(record.AllowAllItems);
             package.Write(record.ExitDistance);
             package.Write(record.Guid ?? "");
             package.Write(record.Active);
