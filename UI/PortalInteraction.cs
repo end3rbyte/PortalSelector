@@ -1,3 +1,4 @@
+using System;
 using HarmonyLib;
 using UnityEngine;
 
@@ -22,9 +23,9 @@ namespace Landoria.PortalSelector
             {
                 name = "Portal";
             }
-            ZDOID selected = Selected(__instance);
+            Guid selected = Selected(__instance);
             string title = name;
-            if (selected != ZDOID.None)
+            if (selected != Guid.Empty)
             {
                 string destinationName = PlayerPortalNames.Get(selected)
                     .RemoveRichTextTags();
@@ -35,7 +36,7 @@ namespace Landoria.PortalSelector
                 title += "  <voffset=-3px>→</voffset>  <color=#FFA500>" +
                     destinationName + "</color>";
             }
-            string statusKey = selected != ZDOID.None ? "$piece_portal_connected" :
+            string statusKey = selected != Guid.Empty ? "$piece_portal_connected" :
                 "$piece_portal_unconnected";
             string status = Localization.instance.Localize(statusKey);
             __result = title + "\n[" + status + "]\n" +
@@ -50,8 +51,8 @@ namespace Landoria.PortalSelector
         [HarmonyPostfix]
         private static void HaveTarget(TeleportWorld __instance, ref bool __result)
         {
-            ZDOID selected = Selected(__instance);
-            __result = selected != ZDOID.None;
+            Guid selected = Selected(__instance);
+            __result = selected != Guid.Empty;
         }
 
         // Mirrors vanilla: request a missing target and wait for its ZDO.
@@ -59,9 +60,35 @@ namespace Landoria.PortalSelector
         [HarmonyPrefix]
         private static bool TargetFound(TeleportWorld __instance, ref bool __result)
         {
-            ZDOID selected = Selected(__instance);
-            __result = PortalConnection.TargetFound(selected);
+            PortalZdoData data = SourceData(__instance);
+            Guid selected = Selected(__instance);
+            bool nearby = LocalPlayerNear(__instance);
+            __result = data != null && PortalConnection.TargetFound(
+                selected, data.DestinationPosition, nearby);
+            if (!__result && nearby && data != null &&
+                PortalConnection.TimedOut(selected, data.DestinationPosition))
+            {
+                ZDO source = __instance.GetComponent<ZNetView>()?.GetZDO();
+                if (source != null)
+                {
+                    PortalDirectory.OnUnresponsive(selected, source.m_uid);
+                }
+            }
             return false;
+        }
+
+        // Limits distant area requests to portals near the local player.
+        private static bool LocalPlayerNear(TeleportWorld portal)
+        {
+            Player player = Player.m_localPlayer;
+            if (player == null || portal.m_proximityRoot == null)
+            {
+                return false;
+            }
+            Vector3 delta = player.transform.position -
+                portal.m_proximityRoot.position;
+            return delta.sqrMagnitude <= portal.m_activationRange *
+                portal.m_activationRange;
         }
 
         // Opens the selector instead of the tag editor when Shift is held.
@@ -107,8 +134,9 @@ namespace Landoria.PortalSelector
             {
                 return true;
             }
-            ZDOID selected = Selected(__instance);
-            if (selected == ZDOID.None)
+            PortalZdoData data = SourceData(__instance);
+            Guid selected = Selected(__instance);
+            if (selected == Guid.Empty)
             {
                 Plugin.DebugLog("Teleport: no destination.");
                 player.Message(MessageHud.MessageType.Center,
@@ -119,15 +147,15 @@ namespace Landoria.PortalSelector
             {
                 return false;
             }
-            ZDO target = PortalConnection.GetConfirmedTarget(selected);
+            ZDO target = PortalConnection.GetConfirmedTarget(selected,
+                data.DestinationPosition);
             if (target == null)
             {
-                PortalConnection.Request(selected);
                 return false;
             }
             if (!PortalDirectory.Remember(target))
             {
-                Plugin.DebugLog("Teleport: received zdo=" + selected +
+                Plugin.DebugLog("Teleport: received guid=" + selected +
                     " could not be recorded.");
                 return false;
             }
@@ -159,14 +187,20 @@ namespace Landoria.PortalSelector
         }
 
         // Reads the destination saved on this source portal's ZDO.
-        internal static ZDOID Selected(TeleportWorld portal)
+        internal static Guid Selected(TeleportWorld portal)
         {
             if (Player.m_localPlayer == null)
             {
-                return ZDOID.None;
+                return Guid.Empty;
             }
             ZDO zdo = portal.GetComponent<ZNetView>()?.GetZDO();
-            return zdo == null ? ZDOID.None : PlayerDestinations.Get(zdo.m_uid);
+            return zdo == null ? Guid.Empty : PlayerDestinations.Get(zdo.m_uid);
+        }
+
+        // Reads the selected route from the source portal ZDO.
+        private static PortalZdoData SourceData(TeleportWorld portal)
+        {
+            return PortalFields.Read(portal.GetComponent<ZNetView>()?.GetZDO());
         }
 
         // Preserves the vanilla world and inventory restrictions.

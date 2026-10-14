@@ -16,7 +16,7 @@ namespace Landoria.PortalSelector
                 return;
             }
             PortalDialog.Open(origin, Records.Values.Where(record =>
-                PlayerPortalNames.IsNamed(record.Id)).ToList());
+                !string.IsNullOrWhiteSpace(record.LastKnownName)).ToList());
         }
     }
 }

@@ -32,17 +32,22 @@ namespace Landoria.PortalSelector
             Logger.LogInfo($"{PluginName} {PluginVersion} loaded.");
             _harmony = new Harmony(PluginGuid);
             _harmony.PatchAll();
+            Game.m_playerInitialSpawn += PortalDirectory.BeginStartupCleanup;
         }
 
         // Scans portals known to the local player.
         private void Update()
         {
+            PortalPeerSync.Update();
             PortalDirectory.Update();
         }
 
         // Removes this mod's hooks when BepInEx unloads it.
         private void OnDestroy()
         {
+            Game.m_playerInitialSpawn -= PortalDirectory.BeginStartupCleanup;
+            PortalDirectory.ResetStartupCleanup();
+            PortalPeerSync.Reset();
             PortalConnection.Reset();
             PlayerDestinations.Reset();
             PortalNameConfirmPatch.Dispose();

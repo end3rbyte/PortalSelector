@@ -1,3 +1,4 @@
+using System;
 using UnityEngine;
 
 namespace Landoria.PortalSelector
@@ -5,7 +6,7 @@ namespace Landoria.PortalSelector
     // Holds a portal remembered by the player's catalog.
     internal sealed class PortalRecord
     {
-        internal ZDOID Id;
+        internal Guid Guid;
         internal string LastKnownName;
         internal Vector3 Position;
         internal Heightmap.Biome Biome;

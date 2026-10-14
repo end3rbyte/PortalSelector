@@ -4,12 +4,16 @@ using UnityEngine;
 
 namespace Landoria.PortalSelector
 {
-    // Keeps a per-character catalog indexed by Valheim's portal ZDOIDs.
+    // Keeps a per-character catalog indexed by stable portal GUIDs.
     internal static partial class PortalDirectory
     {
-        private const string CatalogPrefix = "Landoria.PortalSelector.CatalogZdoV4.";
-        private static readonly Dictionary<ZDOID, PortalRecord> Records =
-            new Dictionary<ZDOID, PortalRecord>();
+        private const string CatalogPrefix = "Landoria.PortalSelector.CatalogGuidV1.";
+        private static readonly Dictionary<Guid, PortalRecord> Records =
+            new Dictionary<Guid, PortalRecord>();
+        // Matches destruction callbacks to GUIDs only during this world session.
+        private static readonly Dictionary<ZDOID, Guid> SeenIds =
+            new Dictionary<ZDOID, Guid>();
+        private static readonly HashSet<Guid> RemovedIds = new HashSet<Guid>();
         private static Player _player;
         private static string _catalogKey;
         private static float _nextScan;
@@ -27,6 +31,7 @@ namespace Landoria.PortalSelector
             {
                 Scan();
             }
+            UpdateStartupCleanup();
         }
 
         // Scans immediately before a player interacts with a portal.
@@ -62,13 +67,7 @@ namespace Landoria.PortalSelector
                 {
                     continue;
                 }
-                PortalFields.EnsureCreated(portal.m_uid);
-                PortalRecord record = CreateRecord(portal);
-                if (record != null && (Records.ContainsKey(portal.m_uid) ||
-                    PortalVanillaImport.TryImport(portal, record)))
-                {
-                    changed |= UpdateRecord(portal);
-                }
+                changed |= ScanPortal(portal);
                 ZDOID targetId = portal.GetConnectionZDOID(
                     ZDOExtraData.ConnectionType.Portal);
                 if (targetId == ZDOID.None)
@@ -80,6 +79,30 @@ namespace Landoria.PortalSelector
                 {
                     portals.Add(target);
                 }
+            }
+            return changed;
+        }
+
+        // Imports and announces a portal the player has just learned about.
+        private static bool ScanPortal(ZDO portal)
+        {
+            PortalFields.EnsureIdentity(portal.m_uid);
+            PortalRecord record = CreateRecord(portal);
+            if (record == null)
+            {
+                return false;
+            }
+            bool discovered = !Records.ContainsKey(record.Guid) &&
+                !RemovedIds.Contains(record.Guid);
+            if (discovered)
+            {
+                PortalVanillaImport.TryImport(portal, record);
+            }
+            bool changed = UpdateRecord(portal);
+            if (discovered && Records.TryGetValue(record.Guid,
+                out PortalRecord added))
+            {
+                PortalPeerSync.AnnouncePortal(portal.m_uid, added);
             }
             return changed;
         }
@@ -112,8 +135,8 @@ namespace Landoria.PortalSelector
             float nearest = float.PositiveInfinity;
             foreach (PortalRecord other in Records.Values)
             {
-                if (other.Id == record.Id || partner != null &&
-                    other.Id == partner.Id)
+                if (other.Guid == record.Guid || partner != null &&
+                    other.Guid == partner.Guid)
                 {
                     continue;
                 }
@@ -124,12 +147,24 @@ namespace Landoria.PortalSelector
             return nearest;
         }
 
-        // Finds a remembered portal by its world object ID.
+        // Finds a remembered portal by its stable identity.
+        internal static PortalRecord Find(Guid guid)
+        {
+            LoadSession();
+            Records.TryGetValue(guid, out PortalRecord record);
+            return record;
+        }
+
+        // Finds a remembered portal by its currently loaded world object.
         internal static PortalRecord Find(ZDOID id)
         {
             LoadSession();
-            Records.TryGetValue(id, out PortalRecord record);
-            return record;
+            PortalZdoData data = PortalFields.Read(id);
+            if (data != null && data.Guid != Guid.Empty)
+            {
+                return Find(data.Guid);
+            }
+            return SeenIds.TryGetValue(id, out Guid guid) ? Find(guid) : null;
         }
 
         // Uses a received destination ZDO and catalogs it after import.
@@ -140,17 +175,26 @@ namespace Landoria.PortalSelector
             {
                 return false;
             }
-            PortalFields.EnsureCreated(portal.m_uid);
+            PortalFields.EnsureIdentity(portal.m_uid);
             PortalRecord details = CreateRecord(portal);
             if (details == null)
             {
                 return false;
             }
-            if ((Records.ContainsKey(portal.m_uid) ||
-                PortalVanillaImport.TryImport(portal, details)) &&
-                UpdateRecord(portal))
+            bool discovered = !Records.ContainsKey(details.Guid) &&
+                !RemovedIds.Contains(details.Guid);
+            if (discovered)
+            {
+                PortalVanillaImport.TryImport(portal, details);
+            }
+            if (UpdateRecord(portal))
             {
                 PlayerPortalCatalog.Save(_player, _catalogKey, Records);
+            }
+            if (discovered && Records.TryGetValue(details.Guid,
+                out PortalRecord added))
+            {
+                PortalPeerSync.AnnouncePortal(portal.m_uid, added);
             }
             return true;
         }
@@ -167,13 +211,17 @@ namespace Landoria.PortalSelector
         {
             LoadSession();
             if (_player == null || string.IsNullOrWhiteSpace(name) ||
-                !Records.TryGetValue(id, out PortalRecord record) ||
+                Find(id) is not PortalRecord record ||
                 record.LastKnownName == name)
             {
                 return;
             }
             record.LastKnownName = name;
             PlayerPortalCatalog.Save(_player, _catalogKey, Records);
+            if (PortalConnection.GetTarget(id)?.IsOwner() == true)
+            {
+                PortalPeerSync.AnnouncePortal(id, record);
+            }
         }
 
         // Loads this character's catalog for the current world.
@@ -193,6 +241,8 @@ namespace Landoria.PortalSelector
             _catalogKey = key;
             _nextScan = 0f;
             Records.Clear();
+            SeenIds.Clear();
+            RemovedIds.Clear();
             PlayerDestinations.Reset();
             PortalConnection.Reset();
             PlayerPortalCatalog.Load(player, key, Records);
@@ -204,7 +254,16 @@ namespace Landoria.PortalSelector
         private static bool UpdateRecord(ZDO portal)
         {
             PortalRecord record = CreateRecord(portal);
-            return record != null && StoreRecord(record);
+            if (record == null)
+            {
+                return false;
+            }
+            if (RemovedIds.Contains(record.Guid))
+            {
+                return false;
+            }
+            SeenIds[portal.m_uid] = record.Guid;
+            return StoreRecord(record);
         }
 
         // Creates display metadata without cataloging the portal.
@@ -218,20 +277,25 @@ namespace Landoria.PortalSelector
             {
                 return null;
             }
-            Vector3 position = portal.GetPosition();
+            PortalZdoData data = PortalFields.Read(portal);
+            if (data.Guid == Guid.Empty)
+            {
+                return null;
+            }
+            Vector3 position = data.Position;
             return new PortalRecord
             {
-                Id = portal.m_uid,
-                LastKnownName = PortalFields.Read(portal).Name,
+                Guid = data.Guid,
+                LastKnownName = data.Name,
                 Position = position,
                 Biome = ResolveBiome(position)
             };
         }
 
-        // Refreshes an existing ZDOID record or adds a newly seen portal.
+        // Refreshes an existing GUID record or adds a newly seen portal.
         private static bool StoreRecord(PortalRecord record)
         {
-            bool existed = Records.TryGetValue(record.Id, out PortalRecord old);
+            bool existed = Records.TryGetValue(record.Guid, out PortalRecord old);
             if (existed && string.IsNullOrWhiteSpace(record.LastKnownName))
             {
                 record.LastKnownName = old.LastKnownName;
@@ -239,10 +303,10 @@ namespace Landoria.PortalSelector
             bool changed = !existed || old.LastKnownName != record.LastKnownName ||
                 old.Position != record.Position ||
                 old.Biome != record.Biome;
-            Records[record.Id] = record;
+            Records[record.Guid] = record;
             if (!existed)
             {
-                Plugin.DebugLog("Catalog: discovered zdo=" + record.Id + ".");
+                Plugin.DebugLog("Catalog: discovered guid=" + record.Guid + ".");
             }
             return changed;
         }

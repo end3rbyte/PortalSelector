@@ -9,9 +9,9 @@ namespace Landoria.PortalSelector
     {
         private const int Format = 1;
 
-        // Reads only the ZDOID catalog format for the current world.
+        // Reads only the GUID catalog format for the current world.
         internal static void Load(Player player, string key,
-            Dictionary<ZDOID, PortalRecord> records)
+            Dictionary<Guid, PortalRecord> records)
         {
             if (!player.m_customData.TryGetValue(key, out string value) ||
                 string.IsNullOrEmpty(value))
@@ -32,9 +32,9 @@ namespace Landoria.PortalSelector
                 for (int i = 0; i < count; i++)
                 {
                     PortalRecord record = ReadRecord(package);
-                    if (record.Id != ZDOID.None)
+                    if (record.Guid != Guid.Empty)
                     {
-                        records[record.Id] = record;
+                        records[record.Guid] = record;
                     }
                 }
                 Plugin.DebugLog("Catalog: loaded " + records.Count + " portals.");
@@ -51,7 +51,7 @@ namespace Landoria.PortalSelector
 
         // Updates memory; Valheim writes it on its next normal character save.
         internal static void Save(Player player, string key,
-            Dictionary<ZDOID, PortalRecord> records)
+            Dictionary<Guid, PortalRecord> records)
         {
             try
             {
@@ -75,17 +75,17 @@ namespace Landoria.PortalSelector
         private static PortalRecord ReadRecord(ZPackage package)
         {
             var record = new PortalRecord();
-            record.Id = package.ReadZDOID();
+            record.Guid = Guid.Parse(package.ReadString());
             record.LastKnownName = package.ReadString();
             record.Position = package.ReadVector3();
             record.Biome = (Heightmap.Biome)package.ReadInt();
             return record;
         }
 
-        // Encodes one portal without a GUID or availability flag.
+        // Encodes one portal by its stable GUID and display metadata.
         private static void WriteRecord(ZPackage package, PortalRecord record)
         {
-            package.Write(record.Id);
+            package.Write(record.Guid.ToString("D"));
             package.Write(record.LastKnownName ?? "");
             package.Write(record.Position);
             package.Write((int)record.Biome);

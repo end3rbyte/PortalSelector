@@ -1,3 +1,4 @@
+using Guid = System.Guid;
 using System.Collections.Generic;
 using System.Linq;
 using GUIFramework;
@@ -23,7 +24,8 @@ namespace Landoria.PortalSelector
         private static GameObject _menu;
         private static GameObject _menuBlocker;
         private static ZDOID _origin;
-        private static ZDOID _selected;
+        private static Guid _originGuid;
+        private static Guid _selected;
         private static List<PortalRecord> _options;
         private const float PickerHeightIncrease = 16f;
         private const float ExtraDialogHeight = 32f;
@@ -35,17 +37,19 @@ namespace Landoria.PortalSelector
         // Opens a native-style dialog grouped by biome and map-center distance.
         internal static void Open(ZDOID origin, List<PortalRecord> records)
         {
-            if (TextInput.instance == null ||
-                !records.Any(r => r.Id == origin && Available(r)))
+            PortalRecord source = PortalDirectory.Find(origin);
+            if (TextInput.instance == null || source == null ||
+                !records.Any(r => r.Guid == source.Guid && Available(r)))
             {
                 return;
             }
             _origin = origin;
-            _options = records.Where(r => r.Id != origin && Available(r))
+            _originGuid = source.Guid;
+            _options = records.Where(r => r.Guid != source.Guid && Available(r))
                 .OrderBy(r => BiomeOrder(r.Biome))
                 .ThenBy(r => r.Position.x * r.Position.x +
                     r.Position.z * r.Position.z)
-                .ThenBy(r => PortalDisplay.Name(r.Id),
+                .ThenBy(r => PortalDisplay.Name(r.Guid),
                     System.StringComparer.CurrentCultureIgnoreCase)
                 .ToList();
             _selected = PlayerDestinations.Get(origin);
@@ -81,8 +85,8 @@ namespace Landoria.PortalSelector
         // Stores the current choice after the native OK action.
         internal static void Confirm()
         {
-            if (_selected != ZDOID.None && _options != null &&
-                _options.Exists(record => record.Id == _selected &&
+            if (_selected != Guid.Empty && _options != null &&
+                _options.Exists(record => record.Guid == _selected &&
                     Available(record)))
             {
                 if (PlayerDestinations.Set(_origin, _selected))
@@ -99,34 +103,71 @@ namespace Landoria.PortalSelector
         }
 
         // Removes a destroyed portal from an open destination dialog.
-        internal static void OnPortalRemoved(ZDOID id)
+        internal static void OnPortalRemoved(Guid guid)
         {
-            if (_origin == id && IsOpen)
+            if (_originGuid == guid && IsOpen)
             {
                 HideMenu();
                 _owner.Hide();
                 return;
             }
-            if (_options == null || _options.RemoveAll(record => record.Id == id) == 0)
+            if (_options == null || _options.RemoveAll(record => record.Guid == guid) == 0)
             {
                 return;
             }
-            if (_selected == id)
+            if (_selected == guid)
             {
-                _selected = ZDOID.None;
+                _selected = Guid.Empty;
             }
             RefreshChoice();
             if (IsOpen && _menu != null && _menu.activeSelf)
             {
-                if (_options.Count == 0) HideMenu();
-                else PopulateMenu();
+                if (_options.Count == 0)
+                {
+                    HideMenu();
+                }
+                else
+                {
+                    PopulateMenu();
+                }
             }
         }
 
-        // Confirms that a saved option still belongs to a cataloged ZDOID.
+        // Refreshes an open picker when a peer announces a portal or new name.
+        internal static void OnPortalUpdated(PortalRecord record)
+        {
+            if (!IsOpen || _options == null || record.Guid == _originGuid)
+            {
+                return;
+            }
+            _options.RemoveAll(option => option.Guid == record.Guid);
+            if (!string.IsNullOrWhiteSpace(record.LastKnownName))
+            {
+                _options.Add(record);
+            }
+            _options = _options.OrderBy(option => BiomeOrder(option.Biome))
+                .ThenBy(option => option.Position.x * option.Position.x +
+                    option.Position.z * option.Position.z)
+                .ThenBy(option => PortalDisplay.Name(option.Guid),
+                    System.StringComparer.CurrentCultureIgnoreCase).ToList();
+            RefreshChoice();
+            if (_menu != null && _menu.activeSelf)
+            {
+                if (_options.Count == 0)
+                {
+                    HideMenu();
+                }
+                else
+                {
+                    PopulateMenu();
+                }
+            }
+        }
+
+        // Confirms that a saved option still belongs to the GUID catalog.
         private static bool Available(PortalRecord option)
         {
-            return PortalDirectory.Find(option.Id) != null;
+            return PortalDirectory.Find(option.Guid) != null;
         }
 
         // Restores the vanilla dialog references during plugin shutdown.
@@ -279,7 +320,7 @@ namespace Landoria.PortalSelector
                 return;
             }
             PortalRecord record = _options?.Find(item =>
-                item.Id == _selected && Available(item));
+                item.Guid == _selected && Available(item));
             string label = record == null ? "Select a portal" : ChoiceLabel(record);
             foreach (TMP_Text text in _choiceButton.GetComponentsInChildren<TMP_Text>(true))
             {

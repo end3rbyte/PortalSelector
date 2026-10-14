@@ -31,6 +31,22 @@ namespace Landoria.PortalSelector
             return portal?.GetString(ZDOVars.s_tag) ?? "";
         }
 
+        // Reads a destination name from its stable catalog identity.
+        internal static string Get(Guid guid)
+        {
+            PortalRecord record = PortalDirectory.Find(guid);
+            if (record == null)
+            {
+                return "";
+            }
+            ZDO portal = PortalConnection.FindLoaded(guid);
+            if (portal != null)
+            {
+                return Get(portal.m_uid);
+            }
+            return record.LastKnownName ?? "";
+        }
+
         // Checks whether a portal has a nonblank name.
         internal static bool IsNamed(ZDOID id)
         {
@@ -95,9 +111,10 @@ namespace Landoria.PortalSelector
             }
             if (InUse(id, name))
             {
+                Guid own = PortalDirectory.Find(id)?.Guid ?? Guid.Empty;
                 var used = new HashSet<string>(PortalDirectory.KnownRecords()
-                    .Where(other => other.Id != id)
-                    .Select(other => Get(other.Id)),
+                    .Where(other => other.Guid != own)
+                    .Select(other => Get(other.Guid)),
                     StringComparer.OrdinalIgnoreCase);
                 name = UniqueName(name, used);
             }
@@ -110,38 +127,38 @@ namespace Landoria.PortalSelector
         }
 
         // Imports a vanilla tag into an owned portal ZDO once.
-        internal static bool ImportFromShared(PortalRecord record,
+        internal static bool ImportFromShared(ZDO portal, PortalRecord record,
             PortalRecord partner)
         {
-            ZDO portal = PortalConnection.GetTarget(record.Id);
             if (portal == null)
             {
                 return false;
             }
+            ZDOID id = portal.m_uid;
             string tag = portal.GetString(ZDOVars.s_tag);
             if (string.IsNullOrWhiteSpace(tag) ||
                 !string.IsNullOrWhiteSpace(PortalFields.Read(portal).Name))
             {
                 return true;
             }
-            if (!PortalFields.Claim(record.Id))
+            if (!PortalFields.Claim(id))
             {
                 return false;
             }
             string name = InitialName(record, partner, tag);
-            if (InUse(record.Id, name))
+            if (InUse(id, name))
             {
                 var used = new HashSet<string>(PortalDirectory.KnownRecords()
-                    .Where(other => other.Id != record.Id)
-                    .Select(other => Get(other.Id)),
+                    .Where(other => other.Guid != record.Guid)
+                    .Select(other => Get(other.Guid)),
                     StringComparer.OrdinalIgnoreCase);
                 name = UniqueName(name, used);
             }
-            if (!PortalFields.SetName(record.Id, name))
+            if (!PortalFields.SetName(id, name))
             {
                 return false;
             }
-            PortalDirectory.CacheName(record.Id, name);
+            PortalDirectory.CacheName(id, name);
             return true;
         }
 
@@ -169,12 +186,13 @@ namespace Landoria.PortalSelector
                 tag + suffix;
         }
 
-        // Checks only other ZDOIDs in the current catalog.
+        // Checks only other portal GUIDs in the current catalog.
         private static bool InUse(ZDOID id, string name)
         {
+            Guid own = PortalDirectory.Find(id)?.Guid ?? Guid.Empty;
             return !string.IsNullOrWhiteSpace(name) &&
-                PortalDirectory.KnownRecords().Any(other => other.Id != id &&
-                    string.Equals(Get(other.Id), name,
+                PortalDirectory.KnownRecords().Any(other => other.Guid != own &&
+                    string.Equals(Get(other.Guid), name,
                         StringComparison.OrdinalIgnoreCase));
         }
 
@@ -194,12 +212,10 @@ namespace Landoria.PortalSelector
             }
         }
 
-        // Uses both ZDOID components to break equal-distance ties.
+        // Uses stable identities to break equal-distance ties.
         private static bool IsFirst(PortalRecord record, PortalRecord partner)
         {
-            return record.Id.UserID != partner.Id.UserID ?
-                record.Id.UserID < partner.Id.UserID :
-                record.Id.ID < partner.Id.ID;
+            return record.Guid.CompareTo(partner.Guid) < 0;
         }
 
     }

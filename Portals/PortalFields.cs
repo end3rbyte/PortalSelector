@@ -1,5 +1,6 @@
 using System;
 using System.Globalization;
+using UnityEngine;
 
 namespace Landoria.PortalSelector
 {
@@ -7,7 +8,11 @@ namespace Landoria.PortalSelector
     internal static class PortalFields
     {
         internal const string NameKey = "Landoria.PortalSelector.Name";
-        internal const string DestinationKey = "Landoria.PortalSelector.Destination";
+        internal const string GuidKey = "Landoria.PortalSelector.Guid";
+        internal const string DestinationGuidKey =
+            "Landoria.PortalSelector.DestinationGuid";
+        internal const string DestinationPositionKey =
+            "Landoria.PortalSelector.DestinationPosition";
         internal const string CreatedAtKey = "Landoria.PortalSelector.CreatedAtUtc";
 
         // Reads the mod's shared fields from a portal ZDO.
@@ -25,26 +30,45 @@ namespace Landoria.PortalSelector
             {
                 createdAt = parsed.ToUniversalTime();
             }
-            return portal == null ? null : new PortalZdoData
+            if (portal == null)
+            {
+                return null;
+            }
+            Guid.TryParse(portal.GetString(GuidKey), out Guid guid);
+            Guid.TryParse(portal.GetString(DestinationGuidKey),
+                out Guid destination);
+            return new PortalZdoData
             {
                 Name = portal.GetString(NameKey),
-                Destination = portal.GetZDOID(DestinationKey),
+                Guid = guid,
+                Position = portal.GetPosition(),
+                DestinationGuid = destination,
+                DestinationPosition = portal.GetVec3(DestinationPositionKey,
+                    Vector3.zero),
                 CreatedAtUtc = createdAt
             };
         }
 
-        // Sets creation time once when the portal's shared data is first written.
-        internal static void EnsureCreated(ZDOID id)
+        // Gives a nearby portal a stable identity when first discovered.
+        internal static bool EnsureIdentity(ZDOID id)
         {
             ZDO portal = PortalConnection.GetTarget(id);
-            if (portal == null || Read(portal).CreatedAtUtc.HasValue)
+            if (portal == null)
             {
-                return;
+                return false;
             }
-            if (Claim(id))
+            if (Read(portal).Guid != Guid.Empty)
             {
-                SetCreatedAt(portal);
+                return true;
             }
+            if (!Claim(id))
+            {
+                return false;
+            }
+            portal.Set(GuidKey, Guid.NewGuid().ToString("D"));
+            SetCreatedAt(portal);
+            ZDOMan.instance.SetDirtyPortals();
+            return true;
         }
 
         private static bool SetCreatedAt(ZDO portal)
@@ -91,15 +115,18 @@ namespace Landoria.PortalSelector
             return true;
         }
 
-        // Writes a destination using Valheim's native ZDOID fields.
-        internal static bool SetDestination(ZDOID id, ZDOID destination)
+        // Stores the destination identity and its last known map position.
+        internal static bool SetDestination(ZDOID id, Guid destination,
+            Vector3 position)
         {
             ZDO portal = PortalConnection.GetTarget(id);
             if (portal == null || !portal.IsOwner() || !SetCreatedAt(portal))
             {
                 return false;
             }
-            portal.Set(DestinationKey, destination);
+            portal.Set(DestinationGuidKey, destination == Guid.Empty ? "" :
+                destination.ToString("D"));
+            portal.Set(DestinationPositionKey, position);
             ZDOMan.instance.SetDirtyPortals();
             return true;
         }

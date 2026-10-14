@@ -1,3 +1,4 @@
+using Guid = System.Guid;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
@@ -9,7 +10,7 @@ namespace Landoria.PortalSelector
     {
         private const float MenuHeight = 260f;
         private const float RowHeight = 36f;
-        private const float ScrollbarWidth = 12f;
+        private const float ScrollbarWidth = 18f;
 
         // Shows or hides the destination list.
         private static void ToggleMenu()
@@ -193,7 +194,7 @@ namespace Landoria.PortalSelector
             colors.pressedColor = new Color(1f, 0.62f, 0.25f, 0.48f);
             colors.selectedColor = Color.clear;
             button.colors = colors;
-            button.onClick.AddListener(() => Select(record.Id));
+            button.onClick.AddListener(() => Select(record.Guid));
             TextMeshProUGUI text = Rect("Label", row, Vector2.zero)
                 .gameObject.AddComponent<TextMeshProUGUI>();
             text.rectTransform.anchorMin = Vector2.zero;
@@ -203,19 +204,19 @@ namespace Landoria.PortalSelector
             text.font = _topic.font;
             text.fontSize = 18f;
             text.alignment = TextAlignmentOptions.MidlineLeft;
-            text.text = PortalDisplay.Name(record.Id);
+            text.text = PortalDisplay.Name(record.Guid);
             text.raycastTarget = false;
         }
 
         // Records the highlighted choice without saving until OK is pressed.
-        private static void Select(ZDOID id)
+        private static void Select(Guid guid)
         {
             if (_options == null || !_options.Exists(record =>
-                    record.Id == id && Available(record)))
+                    record.Guid == guid && Available(record)))
             {
                 return;
             }
-            _selected = id;
+            _selected = guid;
             HideMenu();
             RefreshChoice();
         }
@@ -230,7 +231,7 @@ namespace Landoria.PortalSelector
         // Keeps the selected name and biome visible on the closed button.
         private static string ChoiceLabel(PortalRecord record)
         {
-            return PortalDisplay.Name(record.Id) + " - " +
+            return PortalDisplay.Name(record.Guid) + " - " +
                 BiomeLabel(record.Biome);
         }
 

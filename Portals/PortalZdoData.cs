@@ -1,4 +1,5 @@
 using System;
+using UnityEngine;
 
 namespace Landoria.PortalSelector
 {
@@ -6,7 +7,10 @@ namespace Landoria.PortalSelector
     internal sealed class PortalZdoData
     {
         internal string Name;
-        internal ZDOID Destination;
+        internal Guid Guid;
+        internal Vector3 Position;
+        internal Guid DestinationGuid;
+        internal Vector3 DestinationPosition;
         internal DateTime? CreatedAtUtc;
     }
 }
