@@ -2,7 +2,7 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 
 [assembly: AssemblyTitle("Landoria.PortalSelector")]
-[assembly: AssemblyDescription("Adds personal portal names and destinations to Valheim.")]
+[assembly: AssemblyDescription("Adds shared portal names and destinations to Valheim.")]
 [assembly: AssemblyCompany("Landoria")]
 [assembly: AssemblyProduct("Landoria.PortalSelector")]
 [assembly: AssemblyCopyright("Copyright © 2026 Landoria")]

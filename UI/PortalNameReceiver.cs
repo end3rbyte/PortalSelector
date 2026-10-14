@@ -1,6 +1,6 @@
 namespace Landoria.PortalSelector
 {
-    // Uses Valheim's native text dialog for a personal portal name.
+    // Uses Valheim's native text dialog for a shared portal name.
     internal sealed class PortalNameReceiver : TextReceiver
     {
         private readonly ZDOID _id;
@@ -12,13 +12,13 @@ namespace Landoria.PortalSelector
             _id = id;
         }
 
-        // Returns the current personal name for the native dialog.
+        // Returns the current portal name for the native dialog.
         public string GetText()
         {
             return PlayerPortalNames.Get(_id);
         }
 
-        // Saves the confirmed personal name in character memory.
+        // Saves the confirmed name on the portal ZDO.
         public void SetText(string text)
         {
             if (string.IsNullOrWhiteSpace(text))

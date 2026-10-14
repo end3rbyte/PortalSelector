@@ -7,7 +7,7 @@ namespace Landoria.PortalSelector
     [HarmonyPatch(typeof(ZNetScene), "Awake")]
     internal static class PortalCost
     {
-        internal const float CostMultiplier = 1.5f;
+        internal const float CostMultiplier = 2f;
         // Updates the prefab when the game registers its pieces.
         [HarmonyPostfix]
         private static void OnSceneReady()

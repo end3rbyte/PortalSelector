@@ -3,7 +3,7 @@ using UnityEngine;
 
 namespace Landoria.PortalSelector
 {
-    // Verifies a personal destination through Valheim's native ZDO request.
+    // Verifies a portal destination through Valheim's native ZDO request.
     internal static class PortalConnection
     {
         private static readonly Dictionary<ZDOID, float> Requests =
@@ -30,20 +30,17 @@ namespace Landoria.PortalSelector
             return target;
         }
 
-        // Rejects an ID reused by a different portal after the world changes.
+        // Confirms that the destination portal ZDO has reached this client.
         internal static ZDO GetConfirmedTarget(ZDOID id)
         {
-            PortalRecord record = PortalDirectory.Find(id);
             ZDO target = GetTarget(id);
-            if (record == null || target == null ||
-                target.GetString(PortalDirectory.PortalGuidKey) != record.Guid)
+            if (target == null)
             {
                 return null;
             }
             if (TrackedRequests.Remove(id))
             {
-                Plugin.DebugLog("ZDO: received matching portal guid=" +
-                    record.Guid + " zdo=" + id + ".");
+                Plugin.DebugLog("ZDO: received portal zdo=" + id + ".");
             }
             return target;
         }
@@ -79,12 +76,9 @@ namespace Landoria.PortalSelector
             Requests[id] = Time.unscaledTime;
             if (TrackedRequests.Add(id))
             {
-                PortalRecord record = PortalDirectory.Find(id);
                 ZDO actual = GetTarget(id);
-                Plugin.DebugLog("ZDO: request guid=" + record?.Guid +
-                    " zdo=" + id + " local=" +
-                    (actual == null ? "missing" :
-                        actual.GetString(PortalDirectory.PortalGuidKey)) + ".");
+                Plugin.DebugLog("ZDO: request zdo=" + id + " local=" +
+                    (actual == null ? "missing" : "available") + ".");
             }
             ZDOMan.instance.RequestZDO(id);
         }

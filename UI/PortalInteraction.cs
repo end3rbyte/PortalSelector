@@ -3,7 +3,7 @@ using UnityEngine;
 
 namespace Landoria.PortalSelector
 {
-    // Adds Shift+E to portals and uses each player's chosen destination.
+    // Adds Shift+E to portals and uses their shared destination fields.
     [HarmonyPatch]
     internal static class PortalInteraction
     {
@@ -17,18 +17,21 @@ namespace Landoria.PortalSelector
             {
                 return;
             }
-            string personal = PlayerPortalNames.Get(zdo.m_uid).RemoveRichTextTags();
-            if (string.IsNullOrWhiteSpace(personal))
+            string name = PlayerPortalNames.Get(zdo.m_uid).RemoveRichTextTags();
+            if (string.IsNullOrWhiteSpace(name))
             {
-                personal = "Portal";
+                name = "Portal";
             }
             ZDOID selected = Selected(__instance);
-            string title = personal;
+            string title = name;
             if (selected != ZDOID.None)
             {
-                PortalRecord destination = PortalDirectory.Find(selected);
-                string destinationName = destination == null ? "?" :
-                    PortalDisplay.PersonalName(selected);
+                string destinationName = PlayerPortalNames.Get(selected)
+                    .RemoveRichTextTags();
+                if (string.IsNullOrWhiteSpace(destinationName))
+                {
+                    destinationName = "?";
+                }
                 title += "  <voffset=-3px>→</voffset>  <color=#FFA500>" +
                     destinationName + "</color>";
             }
@@ -80,12 +83,14 @@ namespace Landoria.PortalSelector
             ZDO zdo = __instance.GetComponent<ZNetView>()?.GetZDO();
             if (zdo != null)
             {
+                PortalFields.Claim(zdo.m_uid);
                 if (ShiftHeld())
                 {
                     PortalDirectory.Request(zdo.m_uid);
                 }
                 else
                 {
+                    PortalDirectory.ScanNow();
                     TextInput.instance.RequestText(new PortalNameReceiver(zdo.m_uid),
                         "Portal name", PlayerPortalNames.MaxLength);
                 }
@@ -93,7 +98,7 @@ namespace Landoria.PortalSelector
             return false;
         }
 
-        // Routes only the local player's passage through their chosen portal.
+        // Routes the local player's passage through the shared destination.
         [HarmonyPatch(typeof(TeleportWorld), nameof(TeleportWorld.Teleport))]
         [HarmonyPrefix]
         private static bool Teleport(TeleportWorld __instance, Player player)
@@ -105,20 +110,13 @@ namespace Landoria.PortalSelector
             ZDOID selected = Selected(__instance);
             if (selected == ZDOID.None)
             {
-                Plugin.DebugLog("Teleport: no active personal destination.");
+                Plugin.DebugLog("Teleport: no destination.");
                 player.Message(MessageHud.MessageType.Center,
-                    "Choose a personal destination with Shift+E.");
+                    "Choose a destination with Shift+E.");
                 return false;
             }
             if (!CanTeleport(player, __instance))
             {
-                return false;
-            }
-            PortalRecord details = PortalDirectory.Find(selected);
-            if (details == null)
-            {
-                Plugin.DebugLog("Teleport: selected zdo=" + selected +
-                    " missing from catalog.");
                 return false;
             }
             ZDO target = PortalConnection.GetConfirmedTarget(selected);
@@ -127,26 +125,40 @@ namespace Landoria.PortalSelector
                 PortalConnection.Request(selected);
                 return false;
             }
-            Travel(player, target, details);
+            if (!PortalDirectory.Remember(target))
+            {
+                Plugin.DebugLog("Teleport: received zdo=" + selected +
+                    " could not be recorded.");
+                return false;
+            }
+            Travel(player, target);
             return false;
         }
 
         // Sends the player to the confirmed destination portal.
-        private static void Travel(Player player, ZDO target, PortalRecord details)
+        private static void Travel(Player player, ZDO target)
         {
+            TeleportWorld destination = ZNetScene.instance?.GetPrefab(
+                target.GetPrefab())?.GetComponent<TeleportWorld>();
+            if (destination == null)
+            {
+                Plugin.DebugLog("Teleport: missing portal prefab zdo=" +
+                    target.m_uid + ".");
+                return;
+            }
             Quaternion rotation = target.GetRotation();
             Vector3 exit = target.GetPosition() + rotation * Vector3.forward *
-                details.ExitDistance + Vector3.up;
+                destination.m_exitDistance + Vector3.up;
             bool accepted = player.TeleportTo(exit, rotation, true);
-            Plugin.DebugLog("Teleport: guid=" + details.Guid +
-                " zdo=" + target.m_uid + " accepted=" + accepted + ".");
+            Plugin.DebugLog("Teleport: zdo=" + target.m_uid +
+                " accepted=" + accepted + ".");
             if (accepted)
             {
                 Game.instance.IncrementPlayerStat(PlayerStatType.PortalsUsed);
             }
         }
 
-        // Reads the local player's saved destination for this source portal.
+        // Reads the destination saved on this source portal's ZDO.
         internal static ZDOID Selected(TeleportWorld portal)
         {
             if (Player.m_localPlayer == null)

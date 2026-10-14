@@ -8,17 +8,15 @@ namespace Landoria.PortalSelector
         // Includes remembered portals without checking them in the background.
         internal static void Request(ZDOID origin)
         {
-            _nextScan = 0f;
-            Update();
-            if (Find(origin)?.Active != true ||
-                !PlayerPortalNames.IsNamed(origin))
+            ScanNow();
+            if (Find(origin) == null || !PlayerPortalNames.IsNamed(origin))
             {
                 Player.m_localPlayer?.Message(MessageHud.MessageType.Center,
                     "Name this portal before choosing a destination.");
                 return;
             }
             PortalDialog.Open(origin, Records.Values.Where(record =>
-                record.Active && PlayerPortalNames.IsNamed(record.Id)).ToList());
+                PlayerPortalNames.IsNamed(record.Id)).ToList());
         }
     }
 }

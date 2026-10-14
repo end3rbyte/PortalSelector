@@ -1,12 +1,11 @@
 using System.Collections;
 using GUIFramework;
 using HarmonyLib;
-using UnityEngine;
 using UnityEngine.UI;
 
 namespace Landoria.PortalSelector
 {
-    // Disables the native OK button while a portal name is blank.
+    // Keeps the native rename dialog open for blank or duplicate names.
     [HarmonyPatch(typeof(TextInput), nameof(TextInput.RequestText))]
     internal static class PortalNameConfirmPatch
     {
@@ -15,11 +14,6 @@ namespace Landoria.PortalSelector
         private static bool _editing;
         private static TextInput _owner;
         private static PortalNameReceiver _receiver;
-        private static bool _checking;
-        private static string _pendingName;
-        private static int _checkVersion;
-        private static Player _pendingPlayer;
-        private static long _pendingWorldUid;
 
         // Connects the portal name field to the native OK button.
         [HarmonyPostfix]
@@ -27,18 +21,16 @@ namespace Landoria.PortalSelector
         {
             _editing = false;
             _receiver = null;
-            _checking = false;
-            _checkVersion++;
             if (_okButton != null)
             {
                 _okButton.interactable = true;
             }
-            if (!(sign is PortalNameReceiver))
+            if (!(sign is PortalNameReceiver receiver))
             {
                 return;
             }
             _owner = __instance;
-            _receiver = (PortalNameReceiver)sign;
+            _receiver = receiver;
             GuiInputField field = __instance.m_inputField;
             if (_field != field)
             {
@@ -63,18 +55,13 @@ namespace Landoria.PortalSelector
         // Grays out OK until the player enters a nonblank name.
         private static void UpdateButton(string value)
         {
-            if (_checking && value.Trim() != _pendingName)
-            {
-                _checking = false;
-                _checkVersion++;
-            }
             if (_editing && _okButton != null)
             {
                 _okButton.interactable = !string.IsNullOrWhiteSpace(value);
             }
         }
 
-        // Rejects blank or duplicate names before Valheim closes the dialog.
+        // Rejects a name owned by another ZDOID before the dialog closes.
         internal static bool CanSubmit(TextInput owner)
         {
             if (!_editing || _owner != owner || _receiver == null)
@@ -90,86 +77,15 @@ namespace Landoria.PortalSelector
             {
                 return true;
             }
-            PortalRecord old = PlayerPortalNames.FindNameOwner(_receiver.Id, name);
-            if (old != null &&
-                PortalConnection.GetConfirmedTarget(old.Id) == null)
-            {
-                if (!_checking)
-                {
-                    _checking = true;
-                    _pendingName = name.Trim();
-                    _pendingPlayer = Player.m_localPlayer;
-                    _pendingWorldUid = ZNet.instance.GetWorldUID();
-                    owner.StartCoroutine(CheckReplacement(owner, _field,
-                        old, _pendingName, ++_checkVersion));
-                }
-                return false;
-            }
-            if (_checking)
-            {
-                _checking = false;
-                _checkVersion++;
-            }
-            Reject(owner);
-            return false;
-        }
-
-        // Checks that the old object stays absent before reusing its name.
-        private static IEnumerator CheckReplacement(TextInput owner, GuiInputField field,
-            PortalRecord old, string name, int version)
-        {
-            float deadline = Time.unscaledTime + 3f;
-            while (Time.unscaledTime < deadline)
-            {
-                if (!IsCurrent(owner, field, name, version))
-                {
-                    yield break;
-                }
-                if (PortalConnection.GetConfirmedTarget(old.Id) != null)
-                {
-                    _checking = false;
-                    Reject(owner);
-                    yield break;
-                }
-                PortalConnection.Request(old.Id);
-                yield return new WaitForSecondsRealtime(0.25f);
-            }
-            if (!IsCurrent(owner, field, name, version))
-            {
-                yield break;
-            }
-            if (PortalConnection.GetConfirmedTarget(old.Id) != null)
-            {
-                _checking = false;
-                Reject(owner);
-                yield break;
-            }
-            _checking = false;
-            PortalDirectory.MarkInactive(old.Id);
-            owner.OnInput();
-        }
-
-        // Keeps a delayed confirmation tied to the original open dialog.
-        private static bool IsCurrent(TextInput owner, GuiInputField field,
-            string name, int version)
-        {
-            return _editing && _checking && owner == _owner && field == _field &&
-                owner.m_panel.activeInHierarchy && field.text.Trim() == name &&
-                _checkVersion == version && Player.m_localPlayer == _pendingPlayer &&
-                ZNet.instance != null &&
-                ZNet.instance.GetWorldUID() == _pendingWorldUid;
-        }
-
-        // Keeps the dialog open and returns keyboard focus on a live duplicate.
-        private static void Reject(TextInput owner)
-        {
             Player.m_localPlayer?.Message(MessageHud.MessageType.Center,
                 PlayerPortalNames.DuplicateNameMessage);
             owner.StartCoroutine(RestoreFocus(owner, _field));
+            return false;
         }
 
-        // Returns keyboard focus after the rejected submit event finishes.
-        private static IEnumerator RestoreFocus(TextInput owner, GuiInputField field)
+        // Returns keyboard focus after a rejected submit event finishes.
+        private static IEnumerator RestoreFocus(TextInput owner,
+            GuiInputField field)
         {
             yield return null;
             if (!_editing || owner != _owner || field == null ||
@@ -185,8 +101,6 @@ namespace Landoria.PortalSelector
         internal static void Dispose()
         {
             _editing = false;
-            _checking = false;
-            _checkVersion++;
             if (_okButton != null)
             {
                 _okButton.interactable = true;

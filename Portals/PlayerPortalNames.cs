@@ -4,143 +4,150 @@ using System.Linq;
 
 namespace Landoria.PortalSelector
 {
-    // Stores personal labels under each portal's GUID.
+    // Reads shared PortalSelector names from portal ZDOs and catalog metadata.
     internal static class PlayerPortalNames
     {
         internal const int MaxLength = 50;
         internal const string DuplicateNameMessage =
             "This name is already used by another portal.";
-        private const string Prefix = "Landoria.PortalSelector.NameGuidV1.";
-        private const string AutoPrefix = "Landoria.PortalSelector.AutoNameGuidV1.";
-
-        // Reads the label for the current portal object.
+        // Reads the portal's shared name or its original vanilla label.
         internal static string Get(ZDOID id)
         {
-            Player player = Player.m_localPlayer;
             PortalRecord record = PortalDirectory.Find(id);
-            if (player == null || record == null || ZNet.instance == null)
+            ZDO portal = PortalConnection.GetTarget(id);
+            string live = PortalFields.Read(portal)?.Name;
+            if (!string.IsNullOrWhiteSpace(live))
             {
-                return "";
+                if (record != null && record.LastKnownName != live)
+                {
+                    PortalDirectory.CacheName(id, live);
+                }
+                return live;
             }
-            return player.m_customData.TryGetValue(Key(record), out string value) ?
-                value : "";
+            if (!string.IsNullOrWhiteSpace(record?.LastKnownName))
+            {
+                return record.LastKnownName;
+            }
+            return portal?.GetString(ZDOVars.s_tag) ?? "";
         }
 
-        // Accepts a personal name or a name copied from a shared portal tag.
+        // Checks whether a portal has a nonblank name.
         internal static bool IsNamed(ZDOID id)
         {
             return !string.IsNullOrWhiteSpace(Get(id));
         }
 
-        // Finds an active portal by its personal name for name checks.
-        internal static PortalRecord FindByName(string name)
-        {
-            if (string.IsNullOrWhiteSpace(name))
-            {
-                return null;
-            }
-            return PortalDirectory.KnownRecords().FirstOrDefault(record =>
-                record.Active && string.Equals(Get(record.Id), name,
-                    StringComparison.OrdinalIgnoreCase));
-        }
-
-        // Changes the personal label in memory for Valheim's next save.
+        // Writes a shared name without changing the vanilla portal tag.
         internal static bool Set(ZDOID id, string name)
         {
             Player player = Player.m_localPlayer;
-            PortalRecord record = PortalDirectory.Find(id);
-            if (player != null && record != null && ZNet.instance != null)
+            if (player == null || ZNet.instance == null ||
+                PortalConnection.GetTarget(id) == null)
             {
-                string currentKey = Key(record);
-                string currentAutoKey = AutoKey(record);
-                string personalName = name?.Trim() ?? "";
-                if (personalName.Length > MaxLength)
-                {
-                    personalName = personalName.Substring(0, MaxLength);
-                }
-                if (InUse(record, personalName))
-                {
-                    Player.m_localPlayer.Message(MessageHud.MessageType.Center,
-                        DuplicateNameMessage);
-                    return false;
-                }
-                PortalRecord inactive = FindInactiveNameOwner(id, personalName);
-                if (inactive != null &&
-                    PortalDirectory.RebindInactive(inactive.Id, id))
-                {
-                    player.m_customData.Remove(currentKey);
-                    player.m_customData.Remove(currentAutoKey);
-                }
-                player.m_customData[Key(record)] = personalName;
-                player.m_customData.Remove(AutoKey(record));
-                Plugin.DebugLog("Name: saved guid=" + record.Guid + ".");
-                return true;
+                return false;
             }
-            return false;
+            string personalName = name?.Trim() ?? "";
+            if (personalName.Length > MaxLength)
+            {
+                personalName = personalName.Substring(0, MaxLength);
+            }
+            if (string.IsNullOrWhiteSpace(personalName))
+            {
+                return false;
+            }
+            if (InUse(id, personalName))
+            {
+                player.Message(MessageHud.MessageType.Center,
+                    DuplicateNameMessage);
+                return false;
+            }
+            if (!PortalFields.Claim(id) ||
+                !PortalFields.SetName(id, personalName))
+            {
+                player.Message(MessageHud.MessageType.Center,
+                    "Could not save the portal name.");
+                return false;
+            }
+            PortalDirectory.CacheName(id, personalName);
+            Plugin.DebugLog("Name: saved on zdo=" + id + ".");
+            return true;
         }
 
-        // Reports whether another portal already uses this personal name.
+        // Reports whether another cataloged portal has this name.
         internal static bool NameExists(ZDOID id, string name)
         {
-            Player player = Player.m_localPlayer;
-            PortalRecord record = PortalDirectory.Find(id);
-            return player != null && record != null && ZNet.instance != null &&
-                InUse(record, name?.Trim() ?? "");
+            return Player.m_localPlayer != null && ZNet.instance != null &&
+                PortalConnection.GetTarget(id) != null &&
+                InUse(id, name?.Trim() ?? "");
         }
 
-        // Finds the saved portal that currently owns a proposed name.
-        internal static PortalRecord FindNameOwner(ZDOID id, string name)
+        // Writes a displayed fallback name before a route is chosen.
+        internal static bool EnsureStored(ZDOID id)
         {
-            foreach (PortalRecord candidate in PortalDirectory.KnownRecords())
+            if (!string.IsNullOrWhiteSpace(PortalFields.Read(id)?.Name))
             {
-                if (candidate.Active && candidate.Id != id &&
-                    string.Equals(Get(candidate.Id),
-                    name?.Trim(), StringComparison.OrdinalIgnoreCase))
-                {
-                    return candidate;
-                }
+                return true;
             }
-            return null;
-        }
-
-        // Finds a retired entry that the player is rebuilding under its old name.
-        private static PortalRecord FindInactiveNameOwner(ZDOID id, string name)
-        {
-            return PortalDirectory.KnownRecords().FirstOrDefault(candidate =>
-                !candidate.Active && candidate.Id != id &&
-                string.Equals(Get(candidate.Id), name,
-                    StringComparison.OrdinalIgnoreCase));
-        }
-
-        // Imports a shared tag only once and preserves an existing personal name.
-        internal static void ImportFromShared(PortalRecord record,
-            PortalRecord partner)
-        {
-            Player player = Player.m_localPlayer;
-            if (player == null || ZNet.instance == null)
+            string name = Get(id).Trim();
+            if (string.IsNullOrWhiteSpace(name))
             {
-                return;
+                return false;
             }
-            player.m_customData.Remove(AutoKey(record));
-            if (HasPersonalName(player, record) ||
-                string.IsNullOrWhiteSpace(record.Tag))
-            {
-                return;
-            }
-            string name = InitialName(record, partner);
-            if (InUse(record, name))
+            if (InUse(id, name))
             {
                 var used = new HashSet<string>(PortalDirectory.KnownRecords()
-                    .Where(other => other.Active && other.Guid != record.Guid)
+                    .Where(other => other.Id != id)
                     .Select(other => Get(other.Id)),
                     StringComparer.OrdinalIgnoreCase);
                 name = UniqueName(name, used);
             }
-            player.m_customData[Key(record)] = name;
+            if (!PortalFields.SetName(id, name))
+            {
+                return false;
+            }
+            PortalDirectory.CacheName(id, name);
+            return true;
         }
 
-        // Marks one endpoint of a connected pair and leaves lone portals plain.
-        private static string InitialName(PortalRecord record, PortalRecord partner)
+        // Imports a vanilla tag into an owned portal ZDO once.
+        internal static bool ImportFromShared(PortalRecord record,
+            PortalRecord partner)
+        {
+            ZDO portal = PortalConnection.GetTarget(record.Id);
+            if (portal == null)
+            {
+                return false;
+            }
+            string tag = portal.GetString(ZDOVars.s_tag);
+            if (string.IsNullOrWhiteSpace(tag) ||
+                !string.IsNullOrWhiteSpace(PortalFields.Read(portal).Name))
+            {
+                return true;
+            }
+            if (!PortalFields.Claim(record.Id))
+            {
+                return false;
+            }
+            string name = InitialName(record, partner, tag);
+            if (InUse(record.Id, name))
+            {
+                var used = new HashSet<string>(PortalDirectory.KnownRecords()
+                    .Where(other => other.Id != record.Id)
+                    .Select(other => Get(other.Id)),
+                    StringComparer.OrdinalIgnoreCase);
+                name = UniqueName(name, used);
+            }
+            if (!PortalFields.SetName(record.Id, name))
+            {
+                return false;
+            }
+            PortalDirectory.CacheName(record.Id, name);
+            return true;
+        }
+
+        // Marks one endpoint of a vanilla connected pair with a suffix.
+        private static string InitialName(PortalRecord record,
+            PortalRecord partner, string tag)
         {
             string suffix = "";
             if (partner != null)
@@ -156,30 +163,22 @@ namespace Landoria.PortalSelector
                         distance < partnerDistance : !IsFirst(record, partner);
                 suffix = second ? "_2" : "";
             }
-            string tag = record.Tag.Trim();
+            tag = tag.Trim();
             int available = MaxLength - suffix.Length;
-            if (tag.Length > available)
-            {
-                tag = tag.Substring(0, available);
-            }
-            return tag + suffix;
+            return tag.Length > available ? tag.Substring(0, available) + suffix :
+                tag + suffix;
         }
 
-        // Checks whether another portal already owns this personal name.
-        private static bool InUse(PortalRecord record, string name)
+        // Checks only other ZDOIDs in the current catalog.
+        private static bool InUse(ZDOID id, string name)
         {
-            if (string.IsNullOrWhiteSpace(name))
-            {
-                return false;
-            }
-            string ownIdentity = PortalIdentity.Key(record);
-            return PortalDirectory.KnownRecords().Any(other =>
-                other.Active && PortalIdentity.Key(other) != ownIdentity &&
-                string.Equals(Get(other.Id), name,
-                    StringComparison.OrdinalIgnoreCase));
+            return !string.IsNullOrWhiteSpace(name) &&
+                PortalDirectory.KnownRecords().Any(other => other.Id != id &&
+                    string.Equals(Get(other.Id), name,
+                        StringComparison.OrdinalIgnoreCase));
         }
 
-        // Finds the first free numbered form of a name.
+        // Finds the first unused numbered form of an imported name.
         private static string UniqueName(string proposed, HashSet<string> used)
         {
             for (int number = 2; ; number++)
@@ -195,53 +194,12 @@ namespace Landoria.PortalSelector
             }
         }
 
-        // Checks the current personal label.
-        private static bool HasPersonalName(Player player, PortalRecord record)
-        {
-            return player.m_customData.TryGetValue(Key(record), out string name) &&
-                !string.IsNullOrWhiteSpace(name);
-        }
-
-        // Deletes the personal name and legacy automatic-name marker.
-        internal static void Forget(PortalRecord record)
-        {
-            Player player = Player.m_localPlayer;
-            if (player == null || ZNet.instance == null)
-            {
-                return;
-            }
-            player.m_customData.Remove(Key(record));
-            player.m_customData.Remove(AutoKey(record));
-        }
-
-        // Uses stable GUIDs to break equal-distance ties for a vanilla pair.
+        // Uses both ZDOID components to break equal-distance ties.
         private static bool IsFirst(PortalRecord record, PortalRecord partner)
         {
-            int order = string.CompareOrdinal(PortalIdentity.Key(record),
-                PortalIdentity.Key(partner));
-            if (order != 0)
-            {
-                return order < 0;
-            }
-            if (record.Id.UserID != partner.Id.UserID)
-            {
-                return record.Id.UserID < partner.Id.UserID;
-            }
-            return record.Id.ID < partner.Id.ID;
-        }
-
-        // Scopes the stable identity to the active world.
-        private static string Key(PortalRecord record)
-        {
-            return Prefix + ZNet.instance.GetWorldUID() + "." +
-                PortalIdentity.Key(record);
-        }
-
-        // Marks names generated by this mod so later pairing stays safe.
-        private static string AutoKey(PortalRecord record)
-        {
-            return AutoPrefix + ZNet.instance.GetWorldUID() + "." +
-                PortalIdentity.Key(record);
+            return record.Id.UserID != partner.Id.UserID ?
+                record.Id.UserID < partner.Id.UserID :
+                record.Id.ID < partner.Id.ID;
         }
 
     }

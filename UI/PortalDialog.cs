@@ -24,7 +24,6 @@ namespace Landoria.PortalSelector
         private static GameObject _menuBlocker;
         private static ZDOID _origin;
         private static ZDOID _selected;
-        private static ZDOID _committed;
         private static List<PortalRecord> _options;
         private const float PickerHeightIncrease = 16f;
         private const float ExtraDialogHeight = 32f;
@@ -43,14 +42,13 @@ namespace Landoria.PortalSelector
             }
             _origin = origin;
             _options = records.Where(r => r.Id != origin && Available(r))
-                .OrderBy(r => BiomeOrder(r.Metadata.Biome))
-                .ThenBy(r => r.Metadata.Position.x * r.Metadata.Position.x +
-                    r.Metadata.Position.z * r.Metadata.Position.z)
-                .ThenBy(r => PortalDisplay.PersonalName(r.Id),
+                .OrderBy(r => BiomeOrder(r.Biome))
+                .ThenBy(r => r.Position.x * r.Position.x +
+                    r.Position.z * r.Position.z)
+                .ThenBy(r => PortalDisplay.Name(r.Id),
                     System.StringComparer.CurrentCultureIgnoreCase)
                 .ToList();
-            _committed = PlayerDestinations.Get(origin);
-            _selected = _committed;
+            _selected = PlayerDestinations.Get(origin);
             if (_options.Count == 0)
             {
                 Player.m_localPlayer?.Message(MessageHud.MessageType.Center,
@@ -87,22 +85,28 @@ namespace Landoria.PortalSelector
                 _options.Exists(record => record.Id == _selected &&
                     Available(record)))
             {
-                ZDOID previous = _committed;
-                PlayerDestinations.Set(_origin, _selected);
-                _committed = _selected;
-                PortalPreviousDestinationCheck.Cancel(_committed);
-                if (previous != ZDOID.None && previous != _committed)
+                if (PlayerDestinations.Set(_origin, _selected))
                 {
-                    PortalPreviousDestinationCheck.Begin(previous);
+                    Player.m_localPlayer?.Message(MessageHud.MessageType.TopLeft,
+                        "Portal destination selected.");
                 }
-                Player.m_localPlayer?.Message(MessageHud.MessageType.TopLeft,
-                    "Portal destination selected.");
+                else
+                {
+                    Player.m_localPlayer?.Message(MessageHud.MessageType.Center,
+                        "Could not save the portal destination.");
+                }
             }
         }
 
-        // Removes an option immediately when a background check marks it inactive.
-        internal static void OnPortalInactive(ZDOID id)
+        // Removes a destroyed portal from an open destination dialog.
+        internal static void OnPortalRemoved(ZDOID id)
         {
+            if (_origin == id && IsOpen)
+            {
+                HideMenu();
+                _owner.Hide();
+                return;
+            }
             if (_options == null || _options.RemoveAll(record => record.Id == id) == 0)
             {
                 return;
@@ -110,10 +114,6 @@ namespace Landoria.PortalSelector
             if (_selected == id)
             {
                 _selected = ZDOID.None;
-            }
-            if (_committed == id)
-            {
-                _committed = ZDOID.None;
             }
             RefreshChoice();
             if (IsOpen && _menu != null && _menu.activeSelf)
@@ -123,12 +123,10 @@ namespace Landoria.PortalSelector
             }
         }
 
-        // Confirms that a saved option still belongs to an active record.
+        // Confirms that a saved option still belongs to a cataloged ZDOID.
         private static bool Available(PortalRecord option)
         {
-            PortalRecord current = PortalDirectory.Find(option.Id);
-            return option.Active && current != null && current.Active &&
-                current.Guid == option.Guid;
+            return PortalDirectory.Find(option.Id) != null;
         }
 
         // Restores the vanilla dialog references during plugin shutdown.

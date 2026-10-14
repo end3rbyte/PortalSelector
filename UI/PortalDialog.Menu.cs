@@ -25,7 +25,7 @@ namespace Landoria.PortalSelector
                 if (_options.Count == 0)
                 {
                     Player.m_localPlayer?.Message(MessageHud.MessageType.Center,
-                        "No active destinations available.");
+                        "No known destinations available.");
                     return;
                 }
                 PopulateMenu();
@@ -140,10 +140,10 @@ namespace Landoria.PortalSelector
                 {
                     continue;
                 }
-                if (previousBiome != record.Metadata.Biome)
+                if (previousBiome != record.Biome)
                 {
-                    AddBiomeRow(content, position++, record.Metadata.Biome, contentWidth);
-                    previousBiome = record.Metadata.Biome;
+                    AddBiomeRow(content, position++, record.Biome, contentWidth);
+                    previousBiome = record.Biome;
                 }
                 AddRow(content, position++, record, contentWidth);
             }
@@ -203,7 +203,7 @@ namespace Landoria.PortalSelector
             text.font = _topic.font;
             text.fontSize = 18f;
             text.alignment = TextAlignmentOptions.MidlineLeft;
-            text.text = PortalDisplay.PersonalName(record.Id);
+            text.text = PortalDisplay.Name(record.Id);
             text.raycastTarget = false;
         }
 
@@ -230,8 +230,8 @@ namespace Landoria.PortalSelector
         // Keeps the selected name and biome visible on the closed button.
         private static string ChoiceLabel(PortalRecord record)
         {
-            return PortalDisplay.PersonalName(record.Id) + " - " +
-                BiomeLabel(record.Metadata.Biome);
+            return PortalDisplay.Name(record.Id) + " - " +
+                BiomeLabel(record.Biome);
         }
 
         // Creates a UI rectangle with the requested parent and size.
