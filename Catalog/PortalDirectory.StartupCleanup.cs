@@ -7,7 +7,7 @@ namespace Landoria.PortalSelector
     // Rechecks saved portals once after the local player's first spawn.
     internal static partial class PortalDirectory
     {
-        private const float StartupTimeout = 10f;
+        private const float StartupTimeout = 5f;
         private const float StartupSpacing = 0.25f;
         private const int MaxStartupCandidates = 2048;
         private static readonly Queue<StartupEntry> StartupQueue =
@@ -134,7 +134,7 @@ namespace Landoria.PortalSelector
             }
         }
 
-        // Accepts a matching GUID or expires after two area syncs and ten seconds.
+        // Accepts a matching GUID or expires after two area syncs and five seconds.
         private static void CheckStartupCurrent()
         {
             if (_startupCurrent.Known && !Records.ContainsKey(_startupCurrent.Guid))
