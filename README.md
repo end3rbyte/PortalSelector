@@ -18,7 +18,7 @@ PortalSelector lets you name your portals and choose where they lead.
 
 ## Preview
 
-![PortalSelector in action](assets/PortalSelector.gif)
+![PortalSelector in action](https://raw.githubusercontent.com/landoria-gaming/Landoria.PortalSelector/refs/heads/main/assets/PortalSelector.gif)
 
 ## Contact
 

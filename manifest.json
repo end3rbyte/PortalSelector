@@ -1,6 +1,6 @@
 {
   "name": "PortalSelector",
-  "version_number": "1.0.0",
+  "version_number": "1.0.1",
   "website_url": "https://github.com/landoria-gaming/Landoria.PortalSelector",
   "description": "Name your portals and easily change where they lead.",
   "dependencies": [

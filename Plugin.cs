@@ -10,7 +10,7 @@ namespace Landoria.PortalSelector
     {
         public const string PluginGuid = "Landoria.PortalSelector";
         public const string PluginName = "PortalSelector";
-        public const string PluginVersion = "1.0.0";
+        public const string PluginVersion = "1.0.1";
         private static ManualLogSource _logger;
         private Harmony _harmony;
 
